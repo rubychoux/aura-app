@@ -1,0 +1,1 @@
+cd /Users/siwookim/Desktop/aura-app && npx expo start
