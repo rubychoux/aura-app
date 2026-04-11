@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "aura-app",
-    "slug": "aura-app",
+    "name": "meve",
+    "slug": "meve-app",
     "version": "1.0.0",
-    "scheme": "aura",
+    "scheme": "meve",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.aura-app"
+      "bundleIdentifier": "com.meve.app"
     },
     "android": {
       "adaptiveIcon": {
@@ -37,7 +37,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "AURA가 피부를 분석하기 위해 카메라 접근이 필요해요."
+          "cameraPermission": "meve가 피부를 분석하기 위해 카메라 접근이 필요해요."
         }
       ]
     ]

@@ -157,7 +157,7 @@ export function HomeScreen() {
       >
         {/* 헤더 */}
         <View style={styles.header}>
-          <Text style={styles.wordmark}>AURA</Text>
+          <Text style={styles.wordmark}>meve</Text>
         </View>
 
         {/* 인사 */}

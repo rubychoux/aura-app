@@ -1,4 +1,4 @@
-# AURA — Claude Code Context
+# meve — Claude Code Context
 
 ## 프로젝트 개요
 AI 기반 개인화 스킨케어 진단 앱. 20대 MZ 여성 타겟 (한국 K-뷰티 시장).

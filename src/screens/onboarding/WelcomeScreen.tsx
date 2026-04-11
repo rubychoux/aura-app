@@ -77,7 +77,7 @@ export function WelcomeScreen() {
 
       {/* 헤더 */}
       <View style={styles.header}>
-        <Text style={styles.wordmark}>AURA</Text>
+        <Text style={styles.wordmark}>meve</Text>
         {!isLast && (
           <TouchableOpacity onPress={handleSkip} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Text style={styles.skipText}>건너뛰기</Text>

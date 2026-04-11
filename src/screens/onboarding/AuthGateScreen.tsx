@@ -44,7 +44,7 @@ export function AuthGateScreen() {
 
         {/* 로고 + 태그라인 */}
         <View style={styles.header}>
-          <Text style={styles.logo}>AURA</Text>
+          <Text style={styles.logo}>meve</Text>
           <Text style={styles.tagline}>나만의 AI 스킨케어 코치</Text>
         </View>
 
