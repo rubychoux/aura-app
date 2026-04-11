@@ -1,18 +1,19 @@
 import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { View, ActivityIndicator } from 'react-native';
+import * as Linking from 'expo-linking';
 import { useAuthStore } from '../store';
 import { supabase } from '../services/supabase';
 import { RootStackParamList } from '../types';
 import { OnboardingNavigator } from './OnboardingNavigator';
-import { MainNavigator } from './MainNavigator';
+import { MainStackNavigator } from './MainStackNavigator';
 import { Colors } from '../constants/theme';
-import { View, ActivityIndicator } from 'react-native';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export function RootNavigator() {
-  const { session, isLoading, hasCompletedOnboarding, setSession, setLoading } = useAuthStore();
+  const { session, isLoading, setSession, setUser, setLoading } = useAuthStore();
 
   useEffect(() => {
     // Listen for auth state changes
@@ -27,7 +28,26 @@ export function RootNavigator() {
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    // Handle Kakao OAuth deep link callback
+    const handleDeepLink = async ({ url }: { url: string }) => {
+      console.log('[deeplink] received:', url);
+      if (url.includes('auth/callback')) {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        console.log('[deeplink] session:', session?.user?.id, error);
+        if (session) {
+          useAuthStore.getState().setSession({ accessToken: session.access_token });
+          useAuthStore.getState().setUser(session.user as any);
+        }
+      }
+    };
+
+    Linking.getInitialURL().then((url) => { if (url) handleDeepLink({ url }); });
+    const linkingSub = Linking.addEventListener('url', handleDeepLink);
+
+    return () => {
+      subscription.unsubscribe();
+      linkingSub.remove();
+    };
   }, []);
 
   if (isLoading) {
@@ -61,10 +81,10 @@ export function RootNavigator() {
       }}
     >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {!isAuthenticated || !hasCompletedOnboarding ? (
+        {!isAuthenticated ? (
           <Stack.Screen name="Onboarding" component={OnboardingNavigator} />
         ) : (
-          <Stack.Screen name="Main" component={MainNavigator} />
+          <Stack.Screen name="Main" component={MainStackNavigator} />
         )}
       </Stack.Navigator>
     </NavigationContainer>

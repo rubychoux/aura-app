@@ -1,17 +1,21 @@
 import { create } from 'zustand';
-import { UserProfile } from '../types';
+import { UserProfile, SkinType, SkinConcern, ExperienceLevel, SkinGoal, SkinMode } from '../types';
+
+// ─── Auth Store ───────────────────────────────────────────────────────────────
 
 interface AuthState {
   user: UserProfile | null;
   session: { accessToken: string } | null;
   isLoading: boolean;
   hasCompletedOnboarding: boolean;
+  skinMode: SkinMode;
 
   setUser: (user: UserProfile | null) => void;
   setSession: (session: { accessToken: string } | null) => void;
   setLoading: (val: boolean) => void;
   setOnboardingComplete: () => void;
   updateProfile: (updates: Partial<UserProfile>) => void;
+  setSkinMode: (mode: SkinMode) => void;
   signOut: () => void;
 }
 
@@ -20,6 +24,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   session: null,
   isLoading: true,
   hasCompletedOnboarding: false,
+  skinMode: 'everyday',
 
   setUser: (user) => set({ user }),
   setSession: (session) => set({ session }),
@@ -29,43 +34,40 @@ export const useAuthStore = create<AuthState>((set) => ({
     set((state) => ({
       user: state.user ? { ...state.user, ...updates } : null,
     })),
-  signOut: () =>
-    set({ user: null, session: null, hasCompletedOnboarding: false }),
+  setSkinMode: (skinMode) => set({ skinMode }),
+  signOut: () => set({ user: null, session: null, hasCompletedOnboarding: false, skinMode: 'everyday' }),
 }));
 
-// ─── Onboarding Quiz Store ───────────────────────────────────────────────────
-
-import { SkinType, SkinConcern, AcneType, RoutineComplexity } from '../types';
+// ─── Onboarding Survey Store ──────────────────────────────────────────────────
 
 interface OnboardingState {
-  phone: string;
   skinType: SkinType | null;
   concerns: SkinConcern[];
-  acneType: AcneType | null;
-  routineComplexity: RoutineComplexity | null;
+  routineSteps: number;
+  routineBrands: string[];
+  experienceLevel: ExperienceLevel | null;
+  goal: SkinGoal | null;
   skinDataConsent: boolean;
-  datasetContributionConsent: boolean;
 
-  setPhone: (phone: string) => void;
   setSkinType: (val: SkinType) => void;
   toggleConcern: (val: SkinConcern) => void;
-  setAcneType: (val: AcneType | null) => void;
-  setRoutineComplexity: (val: RoutineComplexity) => void;
+  setRoutineSteps: (val: number) => void;
+  setRoutineBrands: (val: string[]) => void;
+  setExperienceLevel: (val: ExperienceLevel) => void;
+  setGoal: (val: SkinGoal) => void;
   setSkinDataConsent: (val: boolean) => void;
-  setDatasetConsent: (val: boolean) => void;
   reset: () => void;
 }
 
 export const useOnboardingStore = create<OnboardingState>((set) => ({
-  phone: '',
   skinType: null,
   concerns: [],
-  acneType: null,
-  routineComplexity: null,
+  routineSteps: 0,
+  routineBrands: [],
+  experienceLevel: null,
+  goal: null,
   skinDataConsent: false,
-  datasetContributionConsent: false,
 
-  setPhone: (phone) => set({ phone }),
   setSkinType: (skinType) => set({ skinType }),
   toggleConcern: (val) =>
     set((state) => ({
@@ -73,18 +75,19 @@ export const useOnboardingStore = create<OnboardingState>((set) => ({
         ? state.concerns.filter((c) => c !== val)
         : [...state.concerns, val],
     })),
-  setAcneType: (acneType) => set({ acneType }),
-  setRoutineComplexity: (routineComplexity) => set({ routineComplexity }),
+  setRoutineSteps: (routineSteps) => set({ routineSteps }),
+  setRoutineBrands: (routineBrands) => set({ routineBrands }),
+  setExperienceLevel: (experienceLevel) => set({ experienceLevel }),
+  setGoal: (goal) => set({ goal }),
   setSkinDataConsent: (skinDataConsent) => set({ skinDataConsent }),
-  setDatasetConsent: (datasetContributionConsent) => set({ datasetContributionConsent }),
   reset: () =>
     set({
-      phone: '',
       skinType: null,
       concerns: [],
-      acneType: null,
-      routineComplexity: null,
+      routineSteps: 0,
+      routineBrands: [],
+      experienceLevel: null,
+      goal: null,
       skinDataConsent: false,
-      datasetContributionConsent: false,
     }),
 }));

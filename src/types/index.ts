@@ -1,21 +1,36 @@
 // ─── User & Auth ────────────────────────────────────────────────────────────
 
 export type SkinType = '지성' | '건성' | '복합성' | '민감성';
+
 export type SkinConcern =
-  | '여드름' | '블랙헤드' | '모공' | '색소침착' | '건조함' | '트러블 후 자국';
-export type AcneType = '화농성' | '좁쌀' | '모낙염' | '혼합형';
-export type RoutineComplexity = '없음' | '기초만' | '5단계 이상';
+  | '여드름/트러블'
+  | '색소침착/잡티'
+  | '모공'
+  | '주름/탄력'
+  | '건조함/수분부족'
+  | '칙칙함/광채';
+
+export type ExperienceLevel = 'beginner' | 'under1y' | '1to3y' | 'over3y';
+
+export type SkinGoal =
+  | 'clear_skin'
+  | 'hydration'
+  | 'pore_care'
+  | 'brightening';
 
 export interface UserProfile {
   id: string;
-  phone: string;
+  email: string;
+  displayName: string;
   skinType: SkinType | null;
   concerns: SkinConcern[];
-  acneType: AcneType | null;
-  routineComplexity: RoutineComplexity | null;
+  routineSteps: number | null;       // 0–10
+  routineBrands: string[];           // 최대 3개
+  experienceLevel: ExperienceLevel | null;
+  goal: SkinGoal | null;
   isPremium: boolean;
-  skinDataConsent: boolean;         // PIPA: biometric data consent
-  datasetContributionConsent: boolean; // PIPA: optional dataset contribution
+  onboardingCompleted: boolean;
+  skinDataConsent: boolean;          // PIPA: 피부 데이터 수집 동의
   createdAt: string;
 }
 
@@ -46,6 +61,7 @@ export interface IngredientScanResult {
 }
 
 export type FaceZone = '이마' | '볼' | '턱' | '코' | '턱 주변';
+export type AcneType = '화농성' | '좁쌀' | '모낙염' | '혼합형';
 
 export interface ZoneResult {
   zone: FaceZone;
@@ -88,12 +104,12 @@ export interface Procedure {
 export interface DailyLog {
   id: string;
   userId: string;
-  date: string;                      // YYYY-MM-DD
-  sleepHours?: number;               // 4–10
+  date: string;
+  sleepHours?: number;
   stressLevel?: 1 | 2 | 3 | 4 | 5;
   dietNotes?: string;
   dietTags?: DietTag[];
-  cycleDay?: number;                 // 1–28
+  cycleDay?: number;
   cyclePhase?: CyclePhase;
   supplements?: Supplement[];
   procedures?: Procedure[];
@@ -124,20 +140,25 @@ export type RootStackParamList = {
 
 export type OnboardingStackParamList = {
   Welcome: undefined;
-  PhoneAuth: undefined;
-  OTPVerify: { phone: string };
-  SkinQuiz: undefined;
-  PIAPConsent: undefined;
-  NotificationPermission: undefined;
-  OnboardingComplete: undefined;
+  AuthGate: undefined;
+  EmailSignUp: undefined;
+  OTPVerify: { email: string; name: string };
+  Login: undefined;
 };
+
+export type SkinMode = 'wedding' | 'everyday' | 'graduation';
 
 export type MainTabParamList = {
   Home: undefined;
-  Scan: undefined;
-  Log: undefined;
-  Insights: undefined;
-  Shop: undefined;
+  AIScan: undefined;
+  Skincare: undefined;
+  Community: undefined;
+  MyPage: undefined;
+};
+
+export type MainStackParamList = {
+  MainTabs: undefined;
+  ScanResult: { result: ScanAnalysisResult; isSaved?: boolean };
 };
 
 export type ScanStackParamList = {
@@ -149,16 +170,29 @@ export type ScanStackParamList = {
   ScanHistory: undefined;
 };
 
-export type LogStackParamList = {
-  LogHub: undefined;
-  DailyLogEntry: { date?: string };
-  LogDetail: { logId: string };
-  ProcedureHistory: undefined;
-};
+export interface ScanAnalysisResult {
+  overallScore: number;
+  skinCondition: string;
+  acneType: string;
+  severity: number;
+  zones: {
+    forehead: number;
+    leftCheek: number;
+    rightCheek: number;
+    nose: number;
+    chin: number;
+  };
+  keyFindings: string[];
+  recommendations: string[];
+  redness?: {
+    detected: boolean;
+    zones: string[];
+    severity: number;
+    description: string;
+  };
+}
 
-export type InsightsStackParamList = {
-  InsightsFeed: undefined;
-  InsightDetail: { insightId: string };
-  BreakoutPredictionDetail: undefined;
-  SkinProgress: undefined;
+export type AIScanStackParamList = {
+  FaceScanner: undefined;
+  ScanResult: { result: ScanAnalysisResult };
 };

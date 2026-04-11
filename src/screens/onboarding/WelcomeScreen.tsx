@@ -1,113 +1,212 @@
-import React from 'react';
-import { View, Text, StyleSheet, StatusBar } from 'react-native';
+import React, { useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  FlatList,
+  TouchableOpacity,
+  StatusBar,
+  useWindowDimensions,
+} from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { OnboardingStackParamList } from '../../types';
-import { Colors, Typography, Spacing } from '../../constants/theme';
+import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
 import { PrimaryButton } from '../../components/ui';
 
-type Props = {
-  navigation: NativeStackNavigationProp<OnboardingStackParamList, 'Welcome'>;
-};
+type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'Welcome'>;
 
-export function WelcomeScreen({ navigation }: Props) {
+interface Slide {
+  id: string;
+  emoji: string;
+  title: string;
+  description: string;
+  accent: string;
+}
+
+const SLIDES: Slide[] = [
+  {
+    id: '1',
+    emoji: '🔍',
+    title: '왜 내 피부가 이래요?',
+    description: 'AI가 내 피부를 정확히 진단해 드려요.',
+    accent: Colors.accent,
+  },
+  {
+    id: '2',
+    emoji: '🧴',
+    title: '내 피부에 맞는 성분만',
+    description: '수천 개 성분 중 나에게 맞는 것만 골라드려요.',
+    accent: Colors.success,
+  },
+  {
+    id: '3',
+    emoji: '📅',
+    title: 'AI가 처방하는 나만의 30일 루틴',
+    description: 'AI 코치가 루틴을 함께 만들어 드려요.',
+    accent: Colors.accent,
+  },
+];
+
+export function WelcomeScreen() {
+  const navigation = useNavigation<Nav>();
+  const { width } = useWindowDimensions();
+  const flatListRef = useRef<FlatList<Slide>>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const isLast = currentIndex === SLIDES.length - 1;
+
+  const handleNext = () => {
+    if (isLast) {
+      navigation.navigate('AuthGate');
+    } else {
+      const next = currentIndex + 1;
+      flatListRef.current?.scrollToIndex({ index: next, animated: true });
+      setCurrentIndex(next);
+    }
+  };
+
+  const handleSkip = () => {
+    navigation.navigate('AuthGate');
+  };
+
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.bg} />
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor={Colors.bg} />
 
-      <View style={styles.content}>
-        {/* Logo */}
-        <View style={styles.logoSection}>
-          <Text style={styles.wordmark}>AURA</Text>
-          <View style={styles.taglineRow}>
-            <View style={styles.accentLine} />
-            <Text style={styles.tagline}>AI가 내 피부를 기억합니다</Text>
-            <View style={styles.accentLine} />
-          </View>
-        </View>
+      {/* 헤더 */}
+      <View style={styles.header}>
+        <Text style={styles.wordmark}>AURA</Text>
+        {!isLast && (
+          <TouchableOpacity onPress={handleSkip} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={styles.skipText}>건너뛰기</Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
-        {/* Value props */}
-        <View style={styles.props}>
-          {[
-            { emoji: '🔍', text: '성분 하나하나 분석해드려요' },
-            { emoji: '📊', text: '수면·식단·스트레스와 피부를 연결해요' },
-            { emoji: '🧠', text: 'AI가 내 피부 패턴을 발견해줘요' },
-          ].map(({ emoji, text }) => (
-            <View key={text} style={styles.propRow}>
-              <Text style={styles.propEmoji}>{emoji}</Text>
-              <Text style={styles.propText}>{text}</Text>
+      {/* 슬라이드 */}
+      <FlatList
+        ref={flatListRef}
+        data={SLIDES}
+        keyExtractor={(item) => item.id}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        scrollEnabled
+        onMomentumScrollEnd={(e) => {
+          const index = Math.round(e.nativeEvent.contentOffset.x / width);
+          setCurrentIndex(index);
+        }}
+        renderItem={({ item }) => (
+          <View style={[styles.slide, { width }]}>
+            <View style={[styles.emojiCircle, { backgroundColor: item.accent + '18' }]}>
+              <Text style={styles.slideEmoji}>{item.emoji}</Text>
             </View>
+            <Text style={styles.slideTitle}>{item.title}</Text>
+            <Text style={styles.slideDesc}>{item.description}</Text>
+          </View>
+        )}
+        style={styles.flatList}
+      />
+
+      {/* 하단 */}
+      <View style={styles.footer}>
+        {/* 도트 인디케이터 */}
+        <View style={styles.dots}>
+          {SLIDES.map((_, i) => (
+            <View
+              key={i}
+              style={[
+                styles.dot,
+                i === currentIndex ? styles.dotActive : styles.dotInactive,
+              ]}
+            />
           ))}
         </View>
-      </View>
 
-      <View style={styles.footer}>
         <PrimaryButton
-          label="시작하기"
-          onPress={() => navigation.navigate('PhoneAuth')}
+          label={isLast ? '시작하기' : '다음'}
+          onPress={handleNext}
         />
+
         <Text style={styles.disclaimer}>
-          계속 진행하면 이용약관 및 개인정보처리방침에 동의하는 것으로 간주됩니다
+          시작하기를 누르면 이용약관 및 개인정보처리방침에 동의하는 것으로 간주합니다.
         </Text>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.bg,
-    paddingHorizontal: Spacing.lg,
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingTop: Spacing.xxl,
-  },
-  logoSection: {
+  container: { flex: 1, backgroundColor: Colors.bg },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: Spacing.xxl,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.sm,
   },
   wordmark: {
-    fontSize: 52,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    letterSpacing: 12,
-    marginBottom: Spacing.md,
+    fontSize: 22,
+    fontWeight: '800',
+    color: Colors.accent,
+    letterSpacing: 4,
   },
-  taglineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  accentLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: Colors.border,
-  },
-  tagline: {
+  skipText: {
     ...Typography.caption,
     color: Colors.textSecondary,
-    letterSpacing: 1,
   },
-  props: {
-    gap: Spacing.md,
-  },
-  propRow: {
-    flexDirection: 'row',
+  flatList: { flex: 1 },
+  slide: {
+    flex: 1,
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: Spacing.md,
-    gap: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xl,
+    gap: Spacing.lg,
   },
-  propEmoji: { fontSize: 24 },
-  propText: { ...Typography.body, flex: 1 },
+  emojiCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
+  },
+  slideEmoji: { fontSize: 52 },
+  slideTitle: {
+    ...Typography.h1,
+    textAlign: 'center',
+    lineHeight: 38,
+  },
+  slideDesc: {
+    ...Typography.bodySecondary,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
   footer: {
-    paddingBottom: 48,
+    paddingHorizontal: Spacing.xl,
+    paddingBottom: Spacing.xl,
     gap: Spacing.md,
+  },
+  dots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    marginBottom: Spacing.xs,
+  },
+  dot: {
+    height: 6,
+    borderRadius: Radius.full,
+  },
+  dotActive: {
+    width: 24,
+    backgroundColor: Colors.accent,
+  },
+  dotInactive: {
+    width: 6,
+    backgroundColor: Colors.border,
   },
   disclaimer: {
     ...Typography.caption,

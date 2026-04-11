@@ -1,30 +1,30 @@
 import React from 'react';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text } from 'react-native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MainTabParamList } from '../types';
 import { Colors, Typography } from '../constants/theme';
 import { HomeScreen } from '../screens/home/HomeScreen';
-import { ScanScreen } from '../screens/scan/ScanScreen';
-import { LogScreen } from '../screens/log/LogScreen';
-import { InsightsScreen } from '../screens/insights/InsightsScreen';
-import { ShopScreen } from '../screens/shop/ShopScreen';
+import { FaceScannerScreen } from '../screens/scanner/FaceScannerScreen';
+import { SkincareScreen } from '../screens/skincare/SkincareScreen';
+import { CommunityScreen } from '../screens/community/CommunityScreen';
+import { MyPageScreen } from '../screens/mypage/MyPageScreen';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-const icons: Record<string, string> = {
-  Home: '🏠',
-  Scan: '🔍',
-  Log: '📓',
-  Insights: '🧠',
-  Shop: '🛍️',
+const tabEmoji: Record<string, { active: string; inactive: string }> = {
+  Home:      { active: '🏠', inactive: '🏠' },
+  AIScan:    { active: '📸', inactive: '📸' },
+  Skincare:  { active: '🧴', inactive: '🧴' },
+  Community: { active: '👥', inactive: '👥' },
+  MyPage:    { active: '👤', inactive: '👤' },
 };
 
 const labels: Record<string, string> = {
   Home: '홈',
-  Scan: '스캔',
-  Log: '로그',
-  Insights: '인사이트',
-  Shop: '쇼핑',
+  AIScan: 'AI 스캐너',
+  Skincare: '스킨케어',
+  Community: '커뮤니티',
+  MyPage: '마이페이지',
 };
 
 export function MainNavigator() {
@@ -32,8 +32,10 @@ export function MainNavigator() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarIcon: () => (
-          <Text style={{ fontSize: 20 }}>{icons[route.name]}</Text>
+        tabBarIcon: ({ focused }) => (
+          <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.5 }}>
+            {tabEmoji[route.name]?.active ?? '●'}
+          </Text>
         ),
         tabBarLabel: labels[route.name],
         tabBarActiveTintColor: Colors.accent,
@@ -52,10 +54,10 @@ export function MainNavigator() {
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Scan" component={ScanScreen} />
-      <Tab.Screen name="Log" component={LogScreen} />
-      <Tab.Screen name="Insights" component={InsightsScreen} />
-      <Tab.Screen name="Shop" component={ShopScreen} />
+      <Tab.Screen name="AIScan" component={FaceScannerScreen} />
+      <Tab.Screen name="Skincare" component={SkincareScreen} />
+      <Tab.Screen name="Community" component={CommunityScreen} />
+      <Tab.Screen name="MyPage" component={MyPageScreen} />
     </Tab.Navigator>
   );
 }

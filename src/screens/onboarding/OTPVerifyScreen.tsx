@@ -1,148 +1,154 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
-  View, Text, TextInput, StyleSheet, TouchableOpacity, Alert,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  SafeAreaView,
+  Alert,
 } from 'react-native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RouteProp } from '@react-navigation/native';
 import { OnboardingStackParamList } from '../../types';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
+import { supabase } from '../../services/supabase';
+import { useAuthStore } from '../../store';
 import { PrimaryButton } from '../../components/ui';
-import { authService } from '../../services/auth';
 
-type Props = {
-  navigation: NativeStackNavigationProp<OnboardingStackParamList, 'OTPVerify'>;
-  route: RouteProp<OnboardingStackParamList, 'OTPVerify'>;
-};
+type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'OTPVerify'>;
+type Route = RouteProp<OnboardingStackParamList, 'OTPVerify'>;
 
-export function OTPVerifyScreen({ navigation, route }: Props) {
-  const { phone } = route.params;
-  const [code, setCode] = useState(['', '', '', '', '', '']);
+export function OTPVerifyScreen() {
+  const navigation = useNavigation<Nav>();
+  const route = useRoute<Route>();
+  const { email, name } = route.params;
+  const { setSession } = useAuthStore();
+
+  const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
-  const inputs = useRef<(TextInput | null)[]>([]);
+  const [resending, setResending] = useState(false);
 
-  const fullCode = code.join('');
-  const isComplete = fullCode.length === 6;
-
-  function handleChange(text: string, index: number) {
-    const newCode = [...code];
-    newCode[index] = text.slice(-1); // only last character
-    setCode(newCode);
-
-    // Auto-advance
-    if (text && index < 5) {
-      inputs.current[index + 1]?.focus();
-    }
-
-    // Auto-submit
-    if (newCode.every(Boolean)) {
-      handleVerify(newCode.join(''));
-    }
-  }
-
-  function handleKeyPress(key: string, index: number) {
-    if (key === 'Backspace' && !code[index] && index > 0) {
-      inputs.current[index - 1]?.focus();
-    }
-  }
-
-  async function handleVerify(otp?: string) {
-    const token = otp ?? fullCode;
-    if (token.length < 6) return;
+  const handleVerify = async () => {
+    if (otp.length !== 6) return;
     setLoading(true);
-    const { error } = await authService.verifyOTP(phone, token);
-    setLoading(false);
-    if (error) {
-      Alert.alert('인증 실패', '인증번호가 올바르지 않아요. 다시 확인해주세요.');
-      setCode(['', '', '', '', '', '']);
-      inputs.current[0]?.focus();
-      return;
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email,
+        token: otp,
+        type: 'email',
+      });
+      if (error) {
+        Alert.alert('인증 실패', '인증 코드를 다시 확인해 주세요.');
+        return;
+      }
+      if (data.session && data.user) {
+        const { error: upsertError } = await supabase.from('user_profiles').upsert({
+          id: data.user.id,
+          display_name: name,
+          skin_type: 'unknown',
+          skin_concerns: [],
+          goal: 'general',
+          onboarding_completed: false,
+        });
+        console.log('[otp] upsert result:', upsertError);
+        setSession({ accessToken: data.session.access_token });
+        // RootNavigator가 isAuthenticated = true 감지 → Main으로 자동 전환
+      }
+    } catch {
+      Alert.alert('오류', '잠시 후 다시 시도해 주세요.');
+    } finally {
+      setLoading(false);
     }
-    navigation.navigate('SkinQuiz');
-  }
+  };
 
-  async function handleResend() {
-    const { error } = await authService.sendOTP(phone);
-    if (!error) Alert.alert('재전송 완료', '새로운 인증번호를 보내드렸어요.');
-  }
+  const handleResend = async () => {
+    setResending(true);
+    try {
+      await supabase.auth.resend({ type: 'signup', email });
+      Alert.alert('재발송 완료', '인증 코드를 다시 보내드렸어요.');
+    } catch {
+      Alert.alert('오류', '잠시 후 다시 시도해 주세요.');
+    } finally {
+      setResending(false);
+    }
+  };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.back}>←</Text>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.inner}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Text style={styles.backText}>← 뒤로</Text>
         </TouchableOpacity>
-      </View>
 
-      <View style={styles.content}>
-        <Text style={styles.title}>인증번호를{'\n'}입력해주세요</Text>
+        <Text style={styles.title}>이메일 인증</Text>
         <Text style={styles.subtitle}>
-          {phone}으로 문자를 보내드렸어요
+          <Text style={styles.emailText}>{email}</Text>
+          {'\n'}로 보낸 6자리 코드를 입력해 주세요.
         </Text>
 
-        <View style={styles.codeRow}>
-          {code.map((digit, i) => (
-            <TextInput
-              key={i}
-              ref={(el) => { inputs.current[i] = el; }}
-              style={[styles.codeInput, digit ? styles.codeInputFilled : null]}
-              value={digit}
-              onChangeText={(t) => handleChange(t, i)}
-              onKeyPress={({ nativeEvent }) => handleKeyPress(nativeEvent.key, i)}
-              keyboardType="number-pad"
-              maxLength={1}
-              autoFocus={i === 0}
-              selectTextOnFocus
-            />
-          ))}
-        </View>
+        <TextInput
+          style={styles.otpInput}
+          value={otp}
+          onChangeText={(v) => setOtp(v.replace(/[^0-9]/g, '').slice(0, 6))}
+          keyboardType="number-pad"
+          maxLength={6}
+          placeholder="000000"
+          placeholderTextColor={Colors.textSecondary}
+          textAlign="center"
+        />
 
-        <TouchableOpacity onPress={handleResend} style={styles.resendRow}>
-          <Text style={styles.resendText}>인증번호 재전송</Text>
+        <PrimaryButton
+          label="인증하기"
+          onPress={handleVerify}
+          loading={loading}
+          disabled={otp.length !== 6}
+        />
+
+        <TouchableOpacity
+          style={styles.resendBtn}
+          onPress={handleResend}
+          disabled={resending}
+        >
+          <Text style={styles.resendText}>
+            {resending ? '재발송 중...' : '코드를 받지 못하셨나요? 재발송'}
+          </Text>
         </TouchableOpacity>
       </View>
-
-      <View style={styles.footer}>
-        <PrimaryButton
-          label="확인"
-          onPress={() => handleVerify()}
-          loading={loading}
-          disabled={!isComplete}
-        />
-      </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.bg, paddingHorizontal: Spacing.lg },
-  header: { paddingTop: 60, marginBottom: Spacing.xl },
-  back: { fontSize: 24, color: Colors.textPrimary },
-  content: { flex: 1 },
-  title: { ...Typography.h1, marginBottom: Spacing.sm, lineHeight: 38 },
-  subtitle: { ...Typography.bodySecondary, marginBottom: Spacing.xl },
-  codeRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    justifyContent: 'space-between',
-    marginBottom: Spacing.lg,
-  },
-  codeInput: {
+  container: { flex: 1, backgroundColor: Colors.bg },
+  inner: {
     flex: 1,
-    aspectRatio: 1,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.xl,
+  },
+  backBtn: { marginBottom: Spacing.xl },
+  backText: { ...Typography.body, color: Colors.accent },
+  title: { ...Typography.h2, marginBottom: Spacing.sm },
+  subtitle: {
+    ...Typography.body,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.xl,
+    lineHeight: 24,
+  },
+  emailText: { color: Colors.textPrimary, fontWeight: '600' },
+  otpInput: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,
     borderWidth: 1,
     borderColor: Colors.border,
-    textAlign: 'center',
-    fontSize: 24,
+    height: 64,
+    fontSize: 28,
     fontWeight: '700',
     color: Colors.textPrimary,
-    maxHeight: 60,
+    letterSpacing: 8,
+    marginBottom: Spacing.lg,
   },
-  codeInputFilled: {
-    borderColor: Colors.accent,
-  },
-  resendRow: { alignItems: 'center', paddingVertical: Spacing.sm },
+  resendBtn: { marginTop: Spacing.lg, alignItems: 'center' },
   resendText: { ...Typography.caption, color: Colors.accent },
-  footer: { paddingBottom: 48 },
 });

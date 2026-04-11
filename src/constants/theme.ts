@@ -1,34 +1,42 @@
 export const Colors = {
   // Backgrounds
-  bg: '#0D0D0D',
-  surface: '#1A1A1A',
-  surfaceElevated: '#242424',
+  bg: '#FDF6F9',              // 아주 연한 핑크 화이트 — 메인 배경
+  surface: '#FFFFFF',          // 카드, 입력 필드
+  surfaceElevated: '#FCF0F5',  // 연한 핑크 — 섹션 구분
 
-  // Accent
-  accent: '#E8B4B8',       // blush — CTAs only
-  accentMuted: '#C49498',
+  // Accent — Baby Pink
+  accent: '#F2A7C3',           // 메인 포인트 (버튼, CTA)
+  accentMuted: '#F9D0E3',      // 연한 핑크 — 선택 카드 배경
+  accentLight: '#FDE8F1',      // 아주 연한 핑크
 
-  // Semantic
-  success: '#6FCF97',
-  warning: '#F2C94C',
-  danger: '#EB5757',
+  // Secondary — Light Blue
+  secondary: '#A8D5E8',        // 라이트 블루 포인트
+  secondaryMuted: '#D6EDF7',   // 연한 블루
+  secondaryLight: '#EBF6FB',   // 아주 연한 블루
+
+  // Status
+  success: '#85C1AE',          // 세이지 그린 (safe)
+  warning: '#F5C97A',          // 연한 옐로우 (caution)
+  danger: '#F08080',           // 연한 레드 (avoid/error)
 
   // Text
-  textPrimary: '#F5F5F5',
-  textSecondary: '#9B9B9B',
-  textDisabled: '#555555',
+  textPrimary: '#2D2D2D',      // 거의 블랙
+  textSecondary: '#9A8F97',    // 뮤트 핑크 그레이
+  textDisabled: '#C8BFC6',     // 비활성
 
-  // Ingredient flags
-  flagSafe: '#6FCF97',
-  flagCaution: '#F2C94C',
-  flagAvoid: '#EB5757',
+  // UI
+  border: '#F0E6EC',           // 연한 핑크 보더
+  borderMuted: '#F7F0F4',
+  overlay: 'rgba(45,45,45,0.4)',
 
-  // Borders
-  border: '#2A2A2A',
-  borderMuted: '#1F1F1F',
+  // Brand
+  brandPink: '#F2A7C3',        // 메인 핑크
+  brandBlue: '#A8D5E8',        // 메인 블루
 
-  // Transparent
-  overlay: 'rgba(0,0,0,0.6)',
+  // Ingredient flag aliases (used in ui components + skincare screen)
+  flagSafe: '#85C1AE',
+  flagCaution: '#F5C97A',
+  flagAvoid: '#F08080',
 };
 
 export const Typography = {

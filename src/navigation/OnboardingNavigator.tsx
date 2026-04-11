@@ -2,12 +2,10 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { OnboardingStackParamList } from '../types';
 import { WelcomeScreen } from '../screens/onboarding/WelcomeScreen';
-import { PhoneAuthScreen } from '../screens/onboarding/PhoneAuthScreen';
+import { AuthGateScreen } from '../screens/onboarding/AuthGateScreen';
+import { EmailSignUpScreen } from '../screens/onboarding/EmailSignUpScreen';
 import { OTPVerifyScreen } from '../screens/onboarding/OTPVerifyScreen';
-import { SkinQuizScreen } from '../screens/onboarding/SkinQuizScreen';
-import { PIAPConsentScreen } from '../screens/onboarding/PIAPConsentScreen';
-import { NotificationPermissionScreen } from '../screens/onboarding/NotificationPermissionScreen';
-import { OnboardingCompleteScreen } from '../screens/onboarding/OnboardingCompleteScreen';
+import { LoginScreen } from '../screens/onboarding/LoginScreen';
 
 const Stack = createNativeStackNavigator<OnboardingStackParamList>();
 
@@ -21,12 +19,10 @@ export function OnboardingNavigator() {
       }}
     >
       <Stack.Screen name="Welcome" component={WelcomeScreen} />
-      <Stack.Screen name="PhoneAuth" component={PhoneAuthScreen} />
+      <Stack.Screen name="AuthGate" component={AuthGateScreen} />
+      <Stack.Screen name="EmailSignUp" component={EmailSignUpScreen} />
       <Stack.Screen name="OTPVerify" component={OTPVerifyScreen} />
-      <Stack.Screen name="SkinQuiz" component={SkinQuizScreen} />
-      <Stack.Screen name="PIAPConsent" component={PIAPConsentScreen} />
-      <Stack.Screen name="NotificationPermission" component={NotificationPermissionScreen} />
-      <Stack.Screen name="OnboardingComplete" component={OnboardingCompleteScreen} />
+      <Stack.Screen name="Login" component={LoginScreen} />
     </Stack.Navigator>
   );
 }

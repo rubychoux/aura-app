@@ -1,0 +1,16 @@
+import React from 'react';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { MainStackParamList } from '../types';
+import { MainNavigator } from './MainNavigator';
+import { ScanResultScreen } from '../screens/scanner/ScanResultScreen';
+
+const Stack = createNativeStackNavigator<MainStackParamList>();
+
+export function MainStackNavigator() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="MainTabs" component={MainNavigator} />
+      <Stack.Screen name="ScanResult" component={ScanResultScreen} />
+    </Stack.Navigator>
+  );
+}
