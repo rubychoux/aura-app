@@ -1,5 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,782 +10,607 @@ import {
   Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
 import { supabase } from '../../services/supabase';
 import { AIScanStackParamList, ScanAnalysisResult } from '../../types';
 
 type Nav = NativeStackNavigationProp<AIScanStackParamList, 'SkinHome'>;
 
-// ─── Local types ────────────────────────────────────────────────────────────
+// ─── Event config (inline) ───────────────────────────────────────────────────
+
+const EVENT_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  wedding: 'diamond-outline',
+  date: 'heart-outline',
+  graduation: 'school-outline',
+  travel: 'airplane-outline',
+};
+
+const EVENT_INFO: Record<string, { label: string; gradient: [string, string]; tip: string }> = {
+  wedding: { label: '웨딩', gradient: ['#F5E6E8', '#E8D5D8'], tip: '트러블 제로 + 순한 성분 중심으로 관리해요' },
+  date: { label: '데이트', gradient: ['#FCE4EC', '#F8BBD9'], tip: '글로우 집중 + 모공 정돈 케어' },
+  graduation: { label: '졸업', gradient: ['#E3F2FD', '#BBDEFB'], tip: '화사한 피부톤 + 미백 집중' },
+  travel: { label: '여행', gradient: ['#E0F7FA', '#B2EBF2'], tip: '피부 장벽 강화 + 선케어 집중' },
+};
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface IngredientRec {
   name: string;
-  reason: string;
   benefit: string;
+  reason: string;
 }
 interface IngredientAvoid {
   name: string;
   reason: string;
 }
-interface IngredientRecs {
+interface IngredientResult {
   recommended: IngredientRec[];
   avoid: IngredientAvoid[];
-  compatibilityScore: number;
-}
-interface ProductRec {
-  name: string;
-  brand: string;
-  keyIngredients: string[];
-  compatibilityScore: number;
-  reason: string;
-}
-interface IngredientItem {
-  name: string;
-  status: 'safe' | 'caution' | 'avoid';
-  reason: string;
-}
-interface ProductScanResult {
-  productName?: string;
-  ingredients: IngredientItem[];
-  overallScore: number;
-  summary: string;
+  eventTip: string;
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-const TABS = ['내 성분', '제품 탐색', '제품 스캔'];
-const CATEGORIES = ['토너', '세럼', '크림', '선크림'];
-
-async function callOpenAI(prompt: string, imageBase64?: string): Promise<string> {
-  const content: any = imageBase64
-    ? [
-        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } },
-        { type: 'text', text: prompt },
-      ]
-    : prompt;
-
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o',
-      max_tokens: 1500,
-      messages: [{ role: 'user', content }],
-    }),
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error?.message ?? 'OpenAI 오류');
-  const text = data.choices[0].message.content.trim();
-  const match = text.match(/[{[][\s\S]*[}\]]/);
-  if (!match) throw new Error('응답에서 JSON을 찾을 수 없어요');
-  return match[0];
-}
-
-function scoreColor(score: number): string {
-  if (score >= 80) return Colors.success;
-  if (score >= 60) return Colors.warning;
-  return Colors.danger;
-}
-
-function statusColor(status: 'safe' | 'caution' | 'avoid'): string {
-  if (status === 'safe') return Colors.flagSafe;
-  if (status === 'caution') return Colors.flagCaution;
-  return Colors.flagAvoid;
-}
-
-function statusLabel(status: 'safe' | 'caution' | 'avoid'): string {
-  if (status === 'safe') return '안전';
-  if (status === 'caution') return '주의';
-  return '피하기';
-}
-
-// ─── Main component ──────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function SkincareScreen() {
   const navigation = useNavigation<Nav>();
 
-  const [activeTab, setActiveTab] = useState(0);
-
-  // Section 1 — 내 성분
-  const [latestScan, setLatestScan] = useState<ScanAnalysisResult | null>(null);
+  const [eventType, setEventType] = useState<string | null>(null);
+  const [eventDate, setEventDate] = useState<string | null>(null);
+  const [lastScan, setLastScan] = useState<ScanAnalysisResult | null>(null);
   const [scanLoaded, setScanLoaded] = useState(false);
-  const [ingredientRecs, setIngredientRecs] = useState<IngredientRecs | null>(null);
-  const [ingredientLoading, setIngredientLoading] = useState(false);
 
-  // Section 2 — 제품 탐색
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [products, setProducts] = useState<ProductRec[]>([]);
-  const [productLoading, setProductLoading] = useState(false);
+  // Ingredient analysis
+  const [ingredientResult, setIngredientResult] = useState<IngredientResult | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // Section 3 — 제품 스캔
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const cameraRef = useRef<CameraView>(null);
-  const [scanStep, setScanStep] = useState<'idle' | 'analyzing' | 'done'>('idle');
-  const [productScan, setProductScan] = useState<ProductScanResult | null>(null);
-  const [productSaved, setProductSaved] = useState(false);
+  // Routine
+  const [routineData, setRoutineData] = useState<any>(null);
+  const [routineTab, setRoutineTab] = useState<'am' | 'pm'>('am');
 
-  // ── Fetch latest scan on mount ─────────────────────────────────────────────
+  const daysLeft = eventDate
+    ? Math.ceil((new Date(eventDate).getTime() - Date.now()) / 86_400_000)
+    : null;
+  const eventInfo = eventType ? EVENT_INFO[eventType] : null;
+
+  // ── Load data on mount ──────────────────────────────────────────────────────
+
   useEffect(() => {
-    const load = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-        const { data } = await supabase
-          .from('skin_scans')
-          .select('scan_result')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
-        if (data?.scan_result) setLatestScan(data.scan_result as ScanAnalysisResult);
-      } finally {
-        setScanLoaded(true);
-      }
-    };
-    load();
+    loadEvent();
+    loadLastScan();
+    loadCachedIngredients();
+    loadRoutine();
   }, []);
 
-  // ── Load ingredient recs when Section 1 becomes active ────────────────────
-  useEffect(() => {
-    if (activeTab === 0 && latestScan && !ingredientRecs && !ingredientLoading) {
-      loadIngredientRecs();
-    }
-  }, [activeTab, latestScan]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Handlers ──────────────────────────────────────────────────────────────
-
-  const loadIngredientRecs = async () => {
-    setIngredientLoading(true);
+  const loadEvent = async () => {
     try {
-      const json = await callOpenAI(
-        `Based on this skin analysis result: ${JSON.stringify(latestScan)}, provide personalized skincare ingredient recommendations in Korean. Return ONLY JSON: {"recommended": [{"name": "성분명", "reason": "이유", "benefit": "효능"}], "avoid": [{"name": "성분명", "reason": "피해야 하는 이유"}], "compatibilityScore": 0}`
-      );
-      setIngredientRecs(JSON.parse(json));
-    } catch {
-      Alert.alert('오류', '성분 추천을 불러오지 못했어요. 다시 시도해 주세요.');
-    } finally {
-      setIngredientLoading(false);
-    }
+      const [[, type], [, date]] = await AsyncStorage.multiGet([
+        'meve_event_type',
+        'meve_event_date',
+      ]);
+      if (type) setEventType(type);
+      if (date) setEventDate(date);
+    } catch {}
   };
 
-  const loadProducts = async (category: string) => {
-    setSelectedCategory(category);
-    setProducts([]);
-    setProductLoading(true);
-    try {
-      const recommended = ingredientRecs?.recommended.map((r) => r.name).join(', ') ?? '보습, 진정';
-      const json = await callOpenAI(
-        `Based on recommended skincare ingredients (${recommended}), recommend 3 Korean skincare products in the ${category} category. Return ONLY JSON array: [{"name": "제품명", "brand": "브랜드", "keyIngredients": ["성분1"], "compatibilityScore": 85, "reason": "추천 이유"}]`
-      );
-      setProducts(JSON.parse(json));
-    } catch {
-      Alert.alert('오류', '제품 추천을 불러오지 못했어요. 다시 시도해 주세요.');
-    } finally {
-      setProductLoading(false);
-    }
-  };
-
-  const handleProductCapture = async () => {
-    if (!cameraRef.current) return;
-    setScanStep('analyzing');
-    try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7, base64: true });
-      if (!photo.base64) throw new Error('사진을 가져오지 못했어요');
-      const profile = latestScan ? JSON.stringify(latestScan) : '일반 피부';
-      const json = await callOpenAI(
-        `Read the ingredient list from this product label photo. Then analyze each ingredient for this skin profile: ${profile}. Return ONLY JSON: {"productName": "제품명 if visible", "ingredients": [{"name": "성분명", "status": "safe", "reason": "이유"}], "overallScore": 0, "summary": "한 줄 요약"}`,
-        photo.base64
-      );
-      setProductScan(JSON.parse(json));
-      setScanStep('done');
-    } catch (e: any) {
-      Alert.alert('스캔 실패', e?.message ?? '다시 시도해 주세요.');
-      setScanStep('idle');
-    }
-  };
-
-  const handleSaveProduct = async () => {
-    if (!productScan) return;
+  const loadLastScan = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('로그인이 필요해요');
-      await supabase.from('products').insert({
-        user_id: user.id,
-        product_name: productScan.productName ?? '알 수 없는 제품',
-        scan_result: productScan,
+      if (!user) return;
+      const { data } = await supabase
+        .from('skin_scans')
+        .select('scan_result, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (data && data.length > 0) {
+        setLastScan(data[0].scan_result as ScanAnalysisResult);
+      }
+    } finally {
+      setScanLoaded(true);
+    }
+  };
+
+  const loadCachedIngredients = async () => {
+    try {
+      const raw = await AsyncStorage.getItem('meve_ingredients');
+      if (raw) setIngredientResult(JSON.parse(raw));
+    } catch {}
+  };
+
+  const loadRoutine = async () => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const raw = await AsyncStorage.getItem(`meve_routine_${today}`);
+      if (raw) setRoutineData(JSON.parse(raw));
+    } catch {}
+  };
+
+  // ── Ingredient analysis ─────────────────────────────────────────────────────
+
+  const analyzeIngredients = async () => {
+    if (!lastScan) {
+      Alert.alert('피부 스캔 필요', '먼저 AI 피부 스캔을 해주세요');
+      return;
+    }
+    setIsAnalyzing(true);
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          max_tokens: 800,
+          messages: [
+            {
+              role: 'user',
+              content: `You are a Korean skincare expert.
+Skin analysis result: ${JSON.stringify(lastScan)}
+Upcoming event: ${eventType ?? 'none'}, ${daysLeft ?? 'unknown'} days away.
+Return ONLY valid JSON no markdown:
+{
+  "recommended": [{"name":"성분명","benefit":"효능","reason":"이유"}],
+  "avoid": [{"name":"성분명","reason":"이유"}],
+  "eventTip": "D-day 케어 팁 한 줄"
+}
+Max 4 recommended, 3 avoid. All text in Korean.`,
+            },
+          ],
+        }),
       });
-      setProductSaved(true);
-    } catch {
-      Alert.alert('저장 실패', '다시 시도해 주세요.');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message ?? 'OpenAI 오류');
+      const content = data.choices[0].message.content.trim();
+      const jsonMatch = content.match(/[{[][\s\S]*[}\]]/);
+      if (!jsonMatch) throw new Error('JSON 파싱 실패');
+      const result: IngredientResult = JSON.parse(jsonMatch[0]);
+      setIngredientResult(result);
+      await AsyncStorage.setItem('meve_ingredients', JSON.stringify(result));
+    } catch (e: any) {
+      Alert.alert('분석 실패', e?.message ?? '다시 시도해 주세요.');
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* AI 피부 스캔 버튼 */}
-      <TouchableOpacity
-        style={styles.scanHero}
-        onPress={() => navigation.navigate('FaceScanner')}
-        activeOpacity={0.85}
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
       >
-        <Ionicons name="scan-outline" size={32} color="#fff" />
-        <View style={styles.scanHeroText}>
-          <Text style={styles.scanHeroTitle}>AI 피부 스캔</Text>
-          <Text style={styles.scanHeroDesc}>AI가 피부 상태를 분석해드려요</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
-      </TouchableOpacity>
-
-      {/* 탭 스위처 */}
-      <View style={styles.tabSwitcher}>
-        {TABS.map((tab, i) => (
-          <TouchableOpacity
-            key={i}
-            style={[styles.tabBtn, activeTab === i && styles.tabBtnActive]}
-            onPress={() => setActiveTab(i)}
-            activeOpacity={0.7}
+        {/* ── 1. D-DAY BANNER ────────────────────────────────────────────── */}
+        {eventInfo && daysLeft != null && (
+          <LinearGradient
+            colors={eventInfo.gradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.ddayBanner}
           >
-            <Text style={[styles.tabBtnText, activeTab === i && styles.tabBtnTextActive]}>
-              {tab}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+            <View style={styles.ddayRow}>
+              <Ionicons
+                name={EVENT_ICONS[eventType!] ?? 'calendar-outline'}
+                size={22}
+                color={Colors.textPrimary}
+              />
+              <Text style={styles.ddayTitle}>
+                {eventInfo.label}까지 {daysLeft}일
+              </Text>
+            </View>
+            <Text style={styles.ddayTip}>{eventInfo.tip}</Text>
+          </LinearGradient>
+        )}
 
-      {/* ── Section 1: 내 성분 ────────────────────────────────────────────── */}
-      {activeTab === 0 && (
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
+        {/* ── 2. AI 피부 스캔 ─────────────────────────────────────────────── */}
+        <TouchableOpacity
+          style={styles.scanCard}
+          onPress={() => navigation.navigate('FaceScanner')}
+          activeOpacity={0.85}
         >
+          <Ionicons name="scan-outline" size={28} color="#fff" />
+          <View style={styles.scanCardText}>
+            <Text style={styles.scanCardTitle}>AI 피부 스캔</Text>
+            <Text style={styles.scanCardDesc}>AI가 피부 상태를 분석해드려요</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+        </TouchableOpacity>
+
+        {/* ── 3. 성분 스캔하기 ────────────────────────────────────────────── */}
+        <TouchableOpacity
+          style={styles.ingredientScanCard}
+          onPress={() => navigation.navigate('IngredientScanner')}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="flask-outline" size={24} color={Colors.accent} />
+          <View style={styles.scanCardText}>
+            <Text style={styles.ingredientScanTitle}>성분 스캔하기</Text>
+            <Text style={styles.ingredientScanDesc}>제품 성분표를 스캔해요</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
+        </TouchableOpacity>
+
+        {/* ── 4. 맞춤 성분 분석 ───────────────────────────────────────────── */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>내 피부 맞춤 성분</Text>
+            <TouchableOpacity
+              style={styles.analyzeBtn}
+              onPress={analyzeIngredients}
+              disabled={isAnalyzing}
+              activeOpacity={0.8}
+            >
+              {isAnalyzing ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.analyzeBtnText}>
+                  {ingredientResult ? '다시 분석' : '분석하기'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
           {!scanLoaded ? (
-            <View style={styles.center}>
+            <View style={styles.loadingWrap}>
               <ActivityIndicator color={Colors.accent} />
             </View>
-          ) : !latestScan ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="heart-outline" size={32} color={Colors.accentMuted} />
-              <Text style={styles.emptyTitle}>스캔 결과가 없어요</Text>
-              <Text style={styles.emptyDesc}>
-                먼저 AI 피부 스캔을 해주세요.{'\n'}맞춤 성분 추천을 드릴게요!
+          ) : !lastScan && !ingredientResult ? (
+            <View style={styles.emptyBox}>
+              <Ionicons name="flask-outline" size={28} color={Colors.textDisabled} />
+              <Text style={styles.emptyText}>
+                AI 피부 스캔 후 맞춤 성분을 분석해드려요
               </Text>
-              <TouchableOpacity
-                style={styles.primaryBtn}
-                onPress={() => navigation.navigate('FaceScanner')}
-              >
-                <Text style={styles.primaryBtnText}>AI 피부 스캔하기 →</Text>
-              </TouchableOpacity>
             </View>
-          ) : ingredientLoading ? (
-            <View style={styles.center}>
+          ) : isAnalyzing ? (
+            <View style={styles.loadingWrap}>
               <ActivityIndicator color={Colors.accent} size="large" />
               <Text style={styles.loadingText}>맞춤 성분 분석 중...</Text>
             </View>
-          ) : !ingredientRecs ? (
-            <View style={styles.center}>
-              <TouchableOpacity style={styles.primaryBtn} onPress={loadIngredientRecs}>
-                <Text style={styles.primaryBtnText}>성분 추천 받기</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
+          ) : ingredientResult ? (
             <>
-              {/* 호환성 점수 */}
-              <View style={styles.scoreRow}>
-                <Text style={styles.sectionLabel}>피부 호환성</Text>
-                <Text style={[styles.scoreText, { color: scoreColor(ingredientRecs.compatibilityScore) }]}>
-                  {ingredientRecs.compatibilityScore}점
-                </Text>
-              </View>
-
               {/* 추천 성분 */}
-              <Text style={styles.sectionTitle}>✅ 추천 성분</Text>
-              {ingredientRecs.recommended.map((item, i) => (
-                <View key={i} style={[styles.ingredientCard, styles.recommendedCard]}>
-                  <View style={styles.ingredientTag}>
-                    <Text style={styles.ingredientTagText}>{item.name}</Text>
-                  </View>
+              <Text style={styles.subTitle}>
+                <Ionicons name="checkmark-circle" size={14} color={Colors.success} /> 추천 성분
+              </Text>
+              {ingredientResult.recommended.map((item, i) => (
+                <View key={i} style={[styles.ingredientCard, styles.recommendedBorder]}>
+                  <Text style={styles.ingredientName}>{item.name}</Text>
                   <Text style={styles.ingredientBenefit}>{item.benefit}</Text>
                   <Text style={styles.ingredientReason}>{item.reason}</Text>
+                  <TouchableOpacity
+                    onPress={() =>
+                      Linking.openURL(
+                        `https://www.oliveyoung.co.kr/store/search/getSearchMain.do?query=${encodeURIComponent(item.name)}`
+                      )
+                    }
+                  >
+                    <Text style={styles.oliveyoungLink}>올리브영에서 보기 →</Text>
+                  </TouchableOpacity>
                 </View>
               ))}
 
               {/* 피해야 할 성분 */}
-              <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>❌ 피해야 할 성분</Text>
-              {ingredientRecs.avoid.map((item, i) => (
-                <View key={i} style={[styles.ingredientCard, styles.avoidCard]}>
-                  <View style={[styles.ingredientTag, styles.avoidTag]}>
-                    <Text style={[styles.ingredientTagText, { color: Colors.danger }]}>{item.name}</Text>
-                  </View>
+              <Text style={[styles.subTitle, { marginTop: Spacing.md }]}>
+                <Ionicons name="close-circle" size={14} color={Colors.danger} /> 피해야 할 성분
+              </Text>
+              {ingredientResult.avoid.map((item, i) => (
+                <View key={i} style={[styles.ingredientCard, styles.avoidBorder]}>
+                  <Text style={styles.ingredientName}>{item.name}</Text>
                   <Text style={styles.ingredientReason}>{item.reason}</Text>
                 </View>
               ))}
 
-              <TouchableOpacity style={styles.refreshBtn} onPress={() => { setIngredientRecs(null); loadIngredientRecs(); }}>
-                <Text style={styles.refreshBtnText}>새로 분석하기</Text>
-              </TouchableOpacity>
+              {/* Event tip */}
+              {ingredientResult.eventTip && (
+                <View style={styles.eventTipBox}>
+                  <Ionicons name="sparkles-outline" size={14} color={Colors.accent} />
+                  <Text style={styles.eventTipText}>{ingredientResult.eventTip}</Text>
+                </View>
+              )}
             </>
-          )}
-        </ScrollView>
-      )}
+          ) : null}
+        </View>
 
-      {/* ── Section 2: 제품 탐색 ──────────────────────────────────────────── */}
-      {activeTab === 1 && (
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <Text style={styles.sectionTitle}>카테고리 선택</Text>
-          <View style={styles.categoryRow}>
-            {CATEGORIES.map((cat) => (
-              <TouchableOpacity
-                key={cat}
-                style={[styles.categoryBtn, selectedCategory === cat && styles.categoryBtnActive]}
-                onPress={() => loadProducts(cat)}
-                activeOpacity={0.75}
-              >
-                <Text style={[styles.categoryBtnText, selectedCategory === cat && styles.categoryBtnTextActive]}>
-                  {cat}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+        {/* ── 5. 내 루틴 미리보기 ─────────────────────────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>내 루틴</Text>
 
-          {productLoading ? (
-            <View style={styles.center}>
-              <ActivityIndicator color={Colors.accent} size="large" />
-              <Text style={styles.loadingText}>제품 추천 중...</Text>
-            </View>
-          ) : products.length === 0 && selectedCategory ? null : products.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyDesc}>카테고리를 선택하면{'\n'}맞춤 제품을 추천해드려요</Text>
-            </View>
-          ) : (
+          {routineData ? (
             <>
-              <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>
-                {selectedCategory} 추천 제품
-              </Text>
-              {products.map((product, i) => (
-                <View key={i} style={styles.productCard}>
-                  <View style={styles.productHeader}>
-                    <View style={styles.productInfo}>
-                      <Text style={styles.productName}>{product.name}</Text>
-                      <Text style={styles.productBrand}>{product.brand}</Text>
-                    </View>
-                    <View style={[styles.compatBadge, { backgroundColor: scoreColor(product.compatibilityScore) + '22' }]}>
-                      <Text style={[styles.compatScore, { color: scoreColor(product.compatibilityScore) }]}>
-                        {product.compatibilityScore}%
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.keyIngredients}>
-                    {product.keyIngredients.map((ing, j) => (
-                      <View key={j} style={styles.ingTag}>
-                        <Text style={styles.ingTagText}>{ing}</Text>
-                      </View>
-                    ))}
-                  </View>
-                  <Text style={styles.productReason}>{product.reason}</Text>
-                  <TouchableOpacity
-                    onPress={() =>
-                      Linking.openURL(
-                        `https://www.oliveyoung.co.kr/store/search/getSearchMain.do?query=${encodeURIComponent(product.name)}`
-                      )
-                    }
-                    style={styles.oliveyoungBtn}
-                  >
-                    <Text style={styles.oliveyoungText}>올리브영에서 보기 →</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </>
-          )}
-        </ScrollView>
-      )}
-
-      {/* ── Section 3: 제품 스캔 ──────────────────────────────────────────── */}
-      {activeTab === 2 && (
-        <View style={styles.scanContainer}>
-          {/* 권한 없음 */}
-          {!cameraPermission?.granted ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="heart-outline" size={32} color={Colors.accentMuted} />
-              <Text style={styles.emptyTitle}>카메라 권한이 필요해요</Text>
-              <Text style={styles.emptyDesc}>제품 성분표를 스캔하려면{'\n'}카메라 권한을 허용해 주세요.</Text>
-              <TouchableOpacity style={styles.primaryBtn} onPress={requestCameraPermission}>
-                <Text style={styles.primaryBtnText}>권한 허용하기</Text>
-              </TouchableOpacity>
-            </View>
-          ) : scanStep === 'done' && productScan ? (
-            /* 결과 화면 */
-            <ScrollView
-              style={styles.scroll}
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {/* 종합 점수 */}
-              <View style={styles.productScanScore}>
-                <Text style={[styles.bigScore, { color: scoreColor(productScan.overallScore) }]}>
-                  {productScan.overallScore}점
-                </Text>
-                {productScan.productName && (
-                  <Text style={styles.productScanName}>{productScan.productName}</Text>
-                )}
-                <Text style={styles.productScanSummary}>{productScan.summary}</Text>
-              </View>
-
-              {/* 성분 리스트 */}
-              <Text style={styles.sectionTitle}>성분 분석</Text>
-              {productScan.ingredients.map((item, i) => (
-                <View key={i} style={styles.ingredientRow}>
-                  <View style={[styles.statusDot, { backgroundColor: statusColor(item.status) }]} />
-                  <View style={styles.ingredientRowText}>
-                    <Text style={styles.ingredientRowName}>{item.name}</Text>
-                    <Text style={styles.ingredientRowReason}>{item.reason}</Text>
-                  </View>
-                  <View style={[styles.statusBadge, { backgroundColor: statusColor(item.status) + '22' }]}>
-                    <Text style={[styles.statusBadgeText, { color: statusColor(item.status) }]}>
-                      {statusLabel(item.status)}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-
-              {/* 버튼 */}
-              <View style={styles.scanResultBtns}>
+              {/* AM/PM toggle */}
+              <View style={styles.routineToggle}>
                 <TouchableOpacity
-                  style={styles.retryBtn}
-                  onPress={() => { setScanStep('idle'); setProductScan(null); setProductSaved(false); }}
+                  style={[styles.routineToggleBtn, routineTab === 'am' && styles.routineToggleBtnActive]}
+                  onPress={() => setRoutineTab('am')}
                 >
-                  <Text style={styles.retryBtnText}>다시 스캔하기</Text>
+                  <Ionicons name="sunny-outline" size={14} color={routineTab === 'am' ? '#fff' : Colors.textSecondary} />
+                  <Text style={[styles.routineToggleText, routineTab === 'am' && styles.routineToggleTextActive]}>
+                    AM
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.primaryBtn, productSaved && styles.savedBtn]}
-                  onPress={handleSaveProduct}
-                  disabled={productSaved}
+                  style={[styles.routineToggleBtn, routineTab === 'pm' && styles.routineToggleBtnActive]}
+                  onPress={() => setRoutineTab('pm')}
                 >
-                  <Text style={styles.primaryBtnText}>
-                    {productSaved ? '저장됐어요 ✓' : '이 제품 저장하기'}
+                  <Ionicons name="moon-outline" size={14} color={routineTab === 'pm' ? '#fff' : Colors.textSecondary} />
+                  <Text style={[styles.routineToggleText, routineTab === 'pm' && styles.routineToggleTextActive]}>
+                    PM
                   </Text>
                 </TouchableOpacity>
               </View>
-            </ScrollView>
+
+              <View style={styles.routineStatus}>
+                <Ionicons
+                  name={routineData[routineTab] ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={16}
+                  color={routineData[routineTab] ? Colors.success : Colors.textDisabled}
+                />
+                <Text style={styles.routineStatusText}>
+                  {routineData[routineTab] ? `${routineTab.toUpperCase()} 루틴 완료!` : `${routineTab.toUpperCase()} 루틴 미완료`}
+                </Text>
+              </View>
+            </>
           ) : (
-            /* 카메라 + 촬영 버튼 */
-            <View style={{ flex: 1 }}>
-              <CameraView
-                ref={cameraRef}
-                style={StyleSheet.absoluteFill}
-                facing="back"
-              />
-              {scanStep === 'analyzing' && (
-                <View style={styles.analyzingOverlay}>
-                  <ActivityIndicator color={Colors.surface} size="large" />
-                  <Text style={styles.analyzingText}>성분표를 분석하고 있어요...</Text>
-                </View>
-              )}
-              {scanStep === 'idle' && (
-                <View style={styles.cameraGuide}>
-                  <Text style={styles.cameraGuideText}>제품 성분표에 카메라를 맞춰 주세요</Text>
-                  <TouchableOpacity
-                    style={styles.captureBtn}
-                    onPress={handleProductCapture}
-                    activeOpacity={0.85}
-                  >
-                    <View style={styles.captureBtnInner} />
-                  </TouchableOpacity>
-                </View>
-              )}
+            <View style={styles.emptyBox}>
+              <Ionicons name="time-outline" size={28} color={Colors.textDisabled} />
+              <Text style={styles.emptyText}>
+                AI 피부 스캔 후 맞춤 루틴이 생성돼요
+              </Text>
+              <TouchableOpacity
+                style={styles.smallScanBtn}
+                onPress={() => navigation.navigate('FaceScanner')}
+              >
+                <Text style={styles.smallScanBtnText}>스캔하러 가기 →</Text>
+              </TouchableOpacity>
             </View>
           )}
         </View>
-      )}
+
+        <View style={{ height: 40 }} />
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const PAGE_BG = '#FDF6F9';
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.bg },
+  safeArea: { flex: 1, backgroundColor: PAGE_BG },
+  scroll: { flex: 1 },
+  content: { paddingBottom: 20, gap: 12 },
 
-  // AI 스캔 히어로 버튼
-  scanHero: {
+  // D-day banner
+  ddayBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 16,
+    padding: 16,
+    gap: 6,
+  },
+  ddayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  ddayTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  ddayTip: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginLeft: 30,
+  },
+
+  // AI scan card
+  scanCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.accent,
-    borderRadius: Radius.lg,
-    margin: Spacing.md,
-    padding: Spacing.lg,
-    gap: Spacing.md,
+    borderRadius: 16,
+    marginHorizontal: 16,
+    padding: 18,
+    gap: 14,
   },
-  scanHeroText: { flex: 1, gap: 2 },
-  scanHeroTitle: { fontSize: 18, fontWeight: '700', color: '#fff' },
-  scanHeroDesc: { fontSize: 13, color: '#fff', opacity: 0.85 },
-  scroll: { flex: 1 },
-  scrollContent: {
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.lg,
-    paddingBottom: 100,
-    gap: Spacing.sm,
-  },
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: Spacing.xxl,
-    gap: Spacing.md,
-  },
-  loadingText: { ...Typography.bodySecondary },
+  scanCardText: { flex: 1 },
+  scanCardTitle: { fontSize: 16, fontWeight: '700', color: '#fff', marginBottom: 2 },
+  scanCardDesc: { fontSize: 12, color: 'rgba(255,255,255,0.85)' },
 
-  // 탭 스위처
-  tabSwitcher: {
+  // Ingredient scan card
+  ingredientScanCard: {
     flexDirection: 'row',
-    backgroundColor: Colors.surface,
-    marginHorizontal: Spacing.xl,
-    marginTop: Spacing.md,
-    marginBottom: Spacing.sm,
-    borderRadius: Radius.md,
-    padding: 4,
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginHorizontal: 16,
+    padding: 16,
+    gap: 12,
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  tabBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderRadius: Radius.sm,
+  ingredientScanTitle: { fontSize: 15, fontWeight: '600', color: Colors.textPrimary, marginBottom: 2 },
+  ingredientScanDesc: { fontSize: 12, color: Colors.textSecondary },
+
+  // Section
+  section: {
+    marginHorizontal: 16,
+    gap: 10,
   },
-  tabBtnActive: {
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  subTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    marginTop: 4,
+  },
+  analyzeBtn: {
+    backgroundColor: Colors.accent,
+    borderRadius: 20,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  analyzeBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+  },
+
+  // Loading / empty
+  loadingWrap: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xl,
+    gap: Spacing.sm,
+  },
+  loadingText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+  },
+  emptyBox: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 20,
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  emptyText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+  },
+
+  // Ingredient cards
+  ingredientCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  recommendedBorder: {
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.success,
+  },
+  avoidBorder: {
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.danger,
+  },
+  ingredientName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  ingredientBenefit: {
+    fontSize: 13,
+    color: Colors.accent,
+    fontWeight: '500',
+  },
+  ingredientReason: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+  },
+  oliveyoungLink: {
+    fontSize: 12,
+    color: Colors.accent,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+
+  // Event tip
+  eventTipBox: {
+    backgroundColor: '#FFF0F6',
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 4,
+  },
+  eventTipText: {
+    fontSize: 13,
+    color: Colors.accent,
+    flex: 1,
+    lineHeight: 19,
+    fontWeight: '500',
+  },
+
+  // Routine
+  routineToggle: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignSelf: 'flex-start',
+  },
+  routineToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+  },
+  routineToggleBtnActive: {
     backgroundColor: Colors.accent,
   },
-  tabBtnText: {
+  routineToggleText: {
     fontSize: 13,
     fontWeight: '500',
     color: Colors.textSecondary,
   },
-  tabBtnTextActive: {
-    color: Colors.surface,
+  routineToggleTextActive: {
+    color: '#fff',
     fontWeight: '600',
   },
-
-  // Empty / CTA
-  emptyState: {
-    alignItems: 'center',
-    paddingTop: Spacing.xxl,
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.xl,
-  },
-  emptyEmoji: { fontSize: 48 },
-  emptyTitle: { ...Typography.h3, textAlign: 'center' },
-  emptyDesc: { ...Typography.bodySecondary, textAlign: 'center', lineHeight: 22 },
-  primaryBtn: {
-    backgroundColor: Colors.accent,
-    borderRadius: Radius.md,
-    paddingVertical: 14,
-    paddingHorizontal: Spacing.xl,
-    alignItems: 'center',
-  },
-  primaryBtnText: { ...Typography.cta, color: Colors.surface },
-  savedBtn: { backgroundColor: Colors.success },
-  refreshBtn: {
-    marginTop: Spacing.md,
-    alignSelf: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: Spacing.lg,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Colors.accent,
-  },
-  refreshBtnText: { ...Typography.caption, color: Colors.accent, fontWeight: '600' },
-
-  // Section labels
-  sectionTitle: { ...Typography.h3, marginBottom: Spacing.xs },
-  sectionLabel: { ...Typography.caption, color: Colors.textSecondary },
-  scoreRow: {
+  routineStatus: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  scoreText: { fontSize: 20, fontWeight: '700' },
-
-  // Ingredient cards
-  ingredientCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
     gap: 6,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  recommendedCard: { borderLeftWidth: 3, borderLeftColor: Colors.success },
-  avoidCard: { borderLeftWidth: 3, borderLeftColor: Colors.danger },
-  ingredientTag: {
-    alignSelf: 'flex-start',
-    backgroundColor: Colors.success + '22',
-    borderRadius: Radius.full,
-    paddingVertical: 3,
-    paddingHorizontal: Spacing.sm,
+  routineStatusText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.textPrimary,
   },
-  avoidTag: { backgroundColor: Colors.danger + '22' },
-  ingredientTagText: { fontSize: 12, fontWeight: '700', color: Colors.success },
-  ingredientBenefit: { ...Typography.body, fontWeight: '500' },
-  ingredientReason: { ...Typography.caption, color: Colors.textSecondary, lineHeight: 18 },
-
-  // Category buttons
-  categoryRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    flexWrap: 'wrap',
-    marginBottom: Spacing.sm,
+  smallScanBtn: {
+    marginTop: 4,
   },
-  categoryBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: Spacing.md,
-    borderRadius: Radius.full,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
+  smallScanBtnText: {
+    fontSize: 13,
+    color: Colors.accent,
+    fontWeight: '600',
   },
-  categoryBtnActive: {
-    borderColor: Colors.accent,
-    backgroundColor: Colors.accentMuted,
-  },
-  categoryBtnText: { fontSize: 14, fontWeight: '500', color: Colors.textSecondary },
-  categoryBtnTextActive: { color: Colors.accent, fontWeight: '600' },
-
-  // Product cards
-  productCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    gap: Spacing.sm,
-  },
-  productHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  productInfo: { flex: 1, gap: 2 },
-  productName: { ...Typography.body, fontWeight: '700' },
-  productBrand: { ...Typography.caption, color: Colors.textSecondary },
-  compatBadge: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderRadius: Radius.sm,
-  },
-  compatScore: { fontSize: 14, fontWeight: '700' },
-  keyIngredients: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  ingTag: {
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: Radius.full,
-    paddingVertical: 3,
-    paddingHorizontal: Spacing.sm,
-  },
-  ingTagText: { fontSize: 11, color: Colors.textSecondary, fontWeight: '500' },
-  productReason: { ...Typography.caption, color: Colors.textSecondary, lineHeight: 18 },
-  oliveyoungBtn: { alignSelf: 'flex-start' },
-  oliveyoungText: { fontSize: 12, color: Colors.accent, fontWeight: '500' },
-
-  // Section 3 — camera
-  scanContainer: { flex: 1 },
-  analyzingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.md,
-  },
-  analyzingText: { ...Typography.body, color: Colors.surface },
-  cameraGuide: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    paddingBottom: Spacing.xl,
-    gap: Spacing.lg,
-  },
-  cameraGuideText: {
-    ...Typography.caption,
-    color: Colors.surface,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    paddingVertical: 6,
-    paddingHorizontal: Spacing.md,
-    borderRadius: Radius.sm,
-  },
-  captureBtn: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    borderWidth: 3,
-    borderColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  captureBtnInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.surface,
-  },
-
-  // Product scan result
-  productScanScore: {
-    alignItems: 'center',
-    paddingVertical: Spacing.lg,
-    gap: 6,
-  },
-  bigScore: { fontSize: 48, fontWeight: '800' },
-  productScanName: { ...Typography.h3 },
-  productScanSummary: { ...Typography.bodySecondary, textAlign: 'center' },
-  ingredientRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    gap: Spacing.sm,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  statusDot: { width: 10, height: 10, borderRadius: 5, marginTop: 5 },
-  ingredientRowText: { flex: 1, gap: 2 },
-  ingredientRowName: { ...Typography.body, fontWeight: '600' },
-  ingredientRowReason: { ...Typography.caption, color: Colors.textSecondary, lineHeight: 18 },
-  statusBadge: {
-    paddingVertical: 3,
-    paddingHorizontal: Spacing.sm,
-    borderRadius: Radius.full,
-  },
-  statusBadgeText: { fontSize: 11, fontWeight: '600' },
-  scanResultBtns: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    marginTop: Spacing.lg,
-  },
-  retryBtn: {
-    flex: 1,
-    height: 52,
-    borderRadius: Radius.md,
-    borderWidth: 1.5,
-    borderColor: Colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  retryBtnText: { ...Typography.cta, color: Colors.accent },
 });

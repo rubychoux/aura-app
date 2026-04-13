@@ -11,6 +11,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
 import { supabase } from '../../services/supabase';
 import { useAuthStore } from '../../store';
@@ -35,18 +37,42 @@ function scoreColor(score: number): string {
   return Colors.danger;
 }
 
+const FEATURES = [
+  { label: 'AI 피부 스캔', free: '월 3회', premium: '무제한' },
+  { label: '성분 스캔', free: '월 5회', premium: '무제한' },
+  { label: '맞춤 성분 분석', free: 'X', premium: 'O' },
+  { label: 'AI 루틴 생성', free: 'X', premium: 'O' },
+  { label: 'D-day 케어 플랜', free: 'X', premium: 'O' },
+];
+
+const MENU_ITEMS: { icon: keyof typeof Ionicons.glyphMap; label: string; danger?: boolean }[] = [
+  { icon: 'person-outline', label: '프로필 수정' },
+  { icon: 'notifications-outline', label: '알림 설정' },
+  { icon: 'shield-outline', label: '개인정보 처리방침' },
+  { icon: 'document-text-outline', label: '이용약관' },
+  { icon: 'log-out-outline', label: '로그아웃', danger: true },
+];
+
 export function MyPageScreen() {
   const navigation = useNavigation<Nav>();
   const { signOut } = useAuthStore();
+
+  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState<string | null>(null);
-  const [displayName, setDisplayName] = useState<string | null>(null);
+  const [isPremium, setIsPremium] = useState(false);
   const [scans, setScans] = useState<ScanRow[]>([]);
 
   useEffect(() => {
     const load = async () => {
+      // Premium status
+      try {
+        const raw = await AsyncStorage.getItem('meve_is_premium');
+        if (raw === 'true') setIsPremium(true);
+      } catch {}
+
+      // User profile
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
       if (user.email) setEmail(user.email);
 
       const { data: profile } = await supabase
@@ -56,6 +82,7 @@ export function MyPageScreen() {
         .single();
       if (profile?.display_name) setDisplayName(profile.display_name);
 
+      // Scan history
       const { data: scanData } = await supabase
         .from('skin_scans')
         .select('id, created_at, scan_result')
@@ -66,7 +93,7 @@ export function MyPageScreen() {
     load();
   }, []);
 
-  const handleSignOut = async () => {
+  const handleLogout = () => {
     Alert.alert('로그아웃', '정말 로그아웃할까요?', [
       { text: '취소', style: 'cancel' },
       {
@@ -80,6 +107,14 @@ export function MyPageScreen() {
     ]);
   };
 
+  const handleMenuPress = (label: string) => {
+    if (label === '로그아웃') {
+      handleLogout();
+    } else {
+      Alert.alert('준비 중', '이 기능은 곧 추가될 예정이에요!');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <ScrollView
@@ -87,19 +122,84 @@ export function MyPageScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* 헤더 */}
-        <Text style={styles.pageTitle}>마이페이지</Text>
-
-        {/* 프로필 카드 */}
-        <View style={styles.profileCard}>
+        {/* ── 1. PROFILE HEADER ──────────────────────────────────────────── */}
+        <View style={styles.profileHeader}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarEmoji}>👤</Text>
+            <Ionicons name="person" size={36} color="#fff" />
           </View>
-          {displayName && <Text style={styles.displayName}>{displayName}</Text>}
-          <Text style={styles.email}>{email ?? '—'}</Text>
+          <Text style={styles.displayName}>{displayName || '회원'}님</Text>
+          {email && <Text style={styles.email}>{email}</Text>}
+          <View style={[styles.planBadge, isPremium && styles.planBadgePremium]}>
+            <Text style={[styles.planBadgeText, isPremium && styles.planBadgeTextPremium]}>
+              {isPremium ? 'Premium' : 'Free'}
+            </Text>
+          </View>
         </View>
 
-        {/* 내 스캔 이력 */}
+        {/* ── 2. PLAN CARD (if not premium) ──────────────────────────────── */}
+        {!isPremium && (
+          <View style={styles.planCard}>
+            <Text style={styles.planTitle}>meve 프리미엄</Text>
+            <Text style={styles.planSubtitle}>
+              D-day까지 완벽한 피부를 위한 모든 기능
+            </Text>
+
+            {/* Feature table */}
+            <View style={styles.featureTable}>
+              {/* Header */}
+              <View style={styles.featureHeaderRow}>
+                <Text style={[styles.featureCell, styles.featureCellLabel]}>기능</Text>
+                <Text style={[styles.featureCell, styles.featureCellHeader]}>Free</Text>
+                <Text style={[styles.featureCell, styles.featureCellHeader, { color: Colors.accent, fontWeight: '600' }]}>
+                  Premium
+                </Text>
+              </View>
+
+              {/* Rows */}
+              {FEATURES.map((f, i) => (
+                <View
+                  key={i}
+                  style={[styles.featureRow, i < FEATURES.length - 1 && styles.featureRowBorder]}
+                >
+                  <Text style={[styles.featureCell, styles.featureCellLabel, { color: Colors.textPrimary, fontSize: 13 }]}>
+                    {f.label}
+                  </Text>
+                  <Text style={[styles.featureCell, styles.featureCellValue]}>{f.free}</Text>
+                  <Text
+                    style={[
+                      styles.featureCell,
+                      styles.featureCellValue,
+                      { color: f.premium === 'O' || f.premium === '무제한' ? Colors.accent : '#999', fontWeight: '600' },
+                    ]}
+                  >
+                    {f.premium}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            {/* CTA */}
+            <LinearGradient
+              colors={['#F2A7C3', '#C9B8FF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.ctaGradient}
+            >
+              <TouchableOpacity
+                onPress={() =>
+                  Alert.alert('준비 중이에요', '곧 출시될 예정이에요! 조금만 기다려주세요 :)')
+                }
+                style={styles.ctaBtn}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.ctaBtnTitle}>프리미엄 시작하기</Text>
+                <Text style={styles.ctaBtnPrice}>월 9,900원</Text>
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
+        )}
+
+        {/* ── 3. SCAN HISTORY ────────────────────────────────────────────── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>내 스캔 이력</Text>
           {scans.length === 0 ? (
@@ -133,7 +233,7 @@ export function MyPageScreen() {
                     <Text style={[styles.scanScore, { color: scoreColor(row.scan_result.overallScore) }]}>
                       {row.scan_result.overallScore}점
                     </Text>
-                    <Text style={styles.scanArrow}>›</Text>
+                    <Ionicons name="chevron-forward" size={16} color={Colors.textDisabled} />
                   </View>
                 </TouchableOpacity>
               ))}
@@ -141,67 +241,187 @@ export function MyPageScreen() {
           )}
         </View>
 
-        {/* 로그아웃 */}
-        <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut} activeOpacity={0.8}>
-          <Text style={styles.signOutText}>로그아웃</Text>
-        </TouchableOpacity>
+        {/* ── 4. SETTINGS MENU ───────────────────────────────────────────── */}
+        <View style={styles.menuCard}>
+          {MENU_ITEMS.map((item, index) => (
+            <TouchableOpacity
+              key={item.label}
+              style={[styles.menuItem, index < MENU_ITEMS.length - 1 && styles.menuItemBorder]}
+              onPress={() => handleMenuPress(item.label)}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={item.icon}
+                size={20}
+                color={item.danger ? Colors.danger : '#999'}
+              />
+              <Text style={[styles.menuLabel, item.danger && { color: Colors.danger }]}>
+                {item.label}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color="#ddd" />
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.bg },
+  container: { flex: 1, backgroundColor: '#FDF6F9' },
   scroll: { flex: 1 },
-  content: {
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing.xxl,
-    gap: Spacing.lg,
-  },
+  content: { paddingBottom: 20 },
 
-  pageTitle: { ...Typography.h2 },
-
-  // 프로필
-  profileCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.xl,
+  // Profile header
+  profileHeader: {
     alignItems: 'center',
-    gap: Spacing.xs,
+    paddingTop: 24,
+    paddingBottom: 24,
   },
   avatar: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: Colors.surfaceElevated,
+    backgroundColor: Colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: Spacing.sm,
+    marginBottom: 12,
   },
-  avatarEmoji: { fontSize: 32 },
-  displayName: { ...Typography.h3 },
-  email: { ...Typography.caption, color: Colors.textSecondary },
+  displayName: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2D2D2D',
+  },
+  email: {
+    fontSize: 13,
+    color: '#999',
+    marginTop: 2,
+  },
+  planBadge: {
+    marginTop: 8,
+    backgroundColor: '#eee',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  planBadgePremium: {
+    backgroundColor: Colors.accent,
+  },
+  planBadgeText: {
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '600',
+  },
+  planBadgeTextPremium: {
+    color: '#fff',
+  },
 
-  // 스캔 이력
-  section: { gap: Spacing.sm },
+  // Plan card
+  planCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    marginHorizontal: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: Colors.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  planTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#2D2D2D',
+    marginBottom: 4,
+  },
+  planSubtitle: {
+    fontSize: 13,
+    color: '#999',
+    marginBottom: 16,
+  },
+  featureTable: {},
+  featureHeaderRow: {
+    flexDirection: 'row',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E6EC',
+  },
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  featureRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#F9F0F5',
+  },
+  featureCell: {
+    textAlign: 'center',
+  },
+  featureCellLabel: {
+    flex: 1,
+    textAlign: 'left',
+    fontSize: 12,
+    color: '#999',
+  },
+  featureCellHeader: {
+    width: 60,
+    fontSize: 12,
+    color: '#999',
+  },
+  featureCellValue: {
+    width: 60,
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+  },
+
+  // CTA
+  ctaGradient: {
+    borderRadius: 14,
+    marginTop: 20,
+  },
+  ctaBtn: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  ctaBtnTitle: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  ctaBtnPrice: {
+    color: '#fff',
+    opacity: 0.85,
+    fontSize: 13,
+    marginTop: 2,
+  },
+
+  // Section
+  section: {
+    marginHorizontal: 16,
+    gap: Spacing.sm,
+    marginBottom: 16,
+  },
   sectionTitle: { ...Typography.h3 },
   emptyCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
+    backgroundColor: '#fff',
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.border,
     paddingVertical: Spacing.xl,
     alignItems: 'center',
     gap: Spacing.sm,
   },
-  emptyEmoji: { fontSize: 32 },
   emptyText: { ...Typography.bodySecondary, textAlign: 'center', lineHeight: 22 },
+
+  // Scan list
   scanList: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
+    backgroundColor: '#fff',
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.border,
     overflow: 'hidden',
@@ -219,15 +439,27 @@ const styles = StyleSheet.create({
   scanCondition: { ...Typography.body, color: Colors.textPrimary },
   scanRowRight: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   scanScore: { fontSize: 15, fontWeight: '700' },
-  scanArrow: { fontSize: 20, color: Colors.textDisabled },
 
-  // 로그아웃
-  signOutBtn: {
-    borderWidth: 1.5,
-    borderColor: Colors.danger,
-    borderRadius: Radius.md,
-    paddingVertical: 16,
-    alignItems: 'center',
+  // Menu
+  menuCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginHorizontal: 16,
+    overflow: 'hidden',
   },
-  signOutText: { ...Typography.cta, color: Colors.danger },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  menuItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#F9F0F5',
+  },
+  menuLabel: {
+    marginLeft: 12,
+    fontSize: 15,
+    color: '#2D2D2D',
+    flex: 1,
+  },
 });
