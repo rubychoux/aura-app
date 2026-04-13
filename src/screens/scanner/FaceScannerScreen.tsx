@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
@@ -152,7 +153,7 @@ export function FaceScannerScreen() {
   if (!permission.granted) {
     return (
       <SafeAreaView style={styles.permissionContainer}>
-        <Text style={styles.permissionEmoji}>📷</Text>
+        <Ionicons name="camera-outline" size={48} color={Colors.accent} style={{ marginBottom: Spacing.sm }} />
         <Text style={styles.permissionTitle}>카메라 접근이 필요해요</Text>
         <Text style={styles.permissionDesc}>
           AI 피부 진단을 위해 카메라 권한을 허용해 주세요.
@@ -263,7 +264,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     gap: Spacing.md,
   },
-  permissionEmoji: { fontSize: 48 },
   permissionTitle: { ...Typography.h2, textAlign: 'center' },
   permissionDesc: { ...Typography.bodySecondary, textAlign: 'center', lineHeight: 22 },
   permissionBtn: {

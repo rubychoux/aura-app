@@ -39,7 +39,8 @@
         {
           "cameraPermission": "meve가 피부를 분석하기 위해 카메라 접근이 필요해요."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ]
   }
 }

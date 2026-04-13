@@ -146,12 +146,14 @@ export type OnboardingStackParamList = {
   Login: undefined;
 };
 
-export type SkinMode = 'wedding' | 'everyday' | 'graduation';
+export type SkinMode = 'wedding' | 'everyday' | 'graduation' | 'travel';
+
+export type EventType = 'wedding' | 'date' | 'graduation' | 'travel' | 'other';
 
 export type MainTabParamList = {
   Home: undefined;
-  AIScan: undefined;
-  Skincare: undefined;
+  Skin: undefined;
+  Look: undefined;
   Community: undefined;
   MyPage: undefined;
 };
@@ -159,6 +161,12 @@ export type MainTabParamList = {
 export type MainStackParamList = {
   MainTabs: undefined;
   ScanResult: { result: ScanAnalysisResult; isSaved?: boolean };
+  EventFlow: undefined;
+};
+
+export type EventStackParamList = {
+  EventSelect: undefined;
+  EventSetup: { eventType: string };
 };
 
 export type ScanStackParamList = {
@@ -193,6 +201,6 @@ export interface ScanAnalysisResult {
 }
 
 export type AIScanStackParamList = {
+  SkinHome: undefined;
   FaceScanner: undefined;
-  ScanResult: { result: ScanAnalysisResult };
 };

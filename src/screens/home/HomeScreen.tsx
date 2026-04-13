@@ -4,27 +4,29 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   TouchableOpacity,
+  useWindowDimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
-import { MainTabParamList, SkinMode } from '../../types';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { CompositeNavigationProp } from '@react-navigation/native';
+import { MainTabParamList, MainStackParamList } from '../../types';
 import { supabase } from '../../services/supabase';
 import { useAuthStore } from '../../store';
+import { EVENT_CONFIG, EventKey } from '../../constants/events';
 
-type Nav = BottomTabNavigationProp<MainTabParamList, 'Home'>;
+type Nav = CompositeNavigationProp<
+  BottomTabNavigationProp<MainTabParamList, 'Home'>,
+  NativeStackNavigationProp<MainStackParamList>
+>;
 
-const SKIN_MODES: { key: SkinMode; emoji: string; label: string }[] = [
-  { key: 'wedding', emoji: '💍', label: 'Wedding' },
-  { key: 'everyday', emoji: '🌿', label: 'Everyday' },
-  { key: 'graduation', emoji: '🎓', label: 'Graduation' },
-];
-
-// ── Streak helper ─────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function calculateStreak(isoDates: string[]): number {
   if (isoDates.length === 0) return 0;
@@ -47,17 +49,29 @@ function calculateStreak(isoDates: string[]): number {
   return streak;
 }
 
-// ── Routine key ───────────────────────────────────────────────────────────────
-
 function todayRoutineKey() {
-  return `routine_checkin_${new Date().toISOString().slice(0, 10)}`;
+  return `meve_routine_${new Date().toISOString().slice(0, 10)}`;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+function getDaysInMonth(year: number, month: number) {
+  return new Date(year, month + 1, 0).getDate();
+}
 
-interface ScoreData {
-  latest: number;
-  prev: number | null;
+function getFirstDayOfMonth(year: number, month: number) {
+  return new Date(year, month, 1).getDay(); // 0 = Sunday
+}
+
+function formatEventDate(isoStr: string): string {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ScanRecord {
+  date: string; // YYYY-MM-DD
+  score: number;
 }
 
 interface Routine {
@@ -65,20 +79,30 @@ interface Routine {
   pm: boolean;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function HomeScreen() {
   const navigation = useNavigation<Nav>();
-  const { skinMode, setSkinMode } = useAuthStore();
+  const { eventType, eventDate, setEvent } = useAuthStore();
+  const { width } = useWindowDimensions();
 
   const [displayName, setDisplayName] = useState<string | null>(null);
-  const [scoreData, setScoreData] = useState<ScoreData | null>(null);
+  const [scanRecords, setScanRecords] = useState<ScanRecord[]>([]);
+  const [streak, setStreak] = useState<number>(0);
   const [routine, setRoutine] = useState<Routine>({ am: false, pm: false });
-  const [streak, setStreak] = useState<number | null>(null);
+
+  // Calendar state
+  const now = new Date();
+  const [calYear, setCalYear] = useState(now.getFullYear());
+  const [calMonth, setCalMonth] = useState(now.getMonth()); // 0-indexed
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
 
   // ── Initial data loads ──────────────────────────────────────────────────────
   useEffect(() => {
     loadProfile();
     loadScans();
     loadRoutine();
+    loadEventFromStorage();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
@@ -112,17 +136,13 @@ export function HomeScreen() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
-    if (!data || data.length === 0) {
-      setStreak(0);
-      return;
-    }
+    if (!data || data.length === 0) return;
 
-    // Score tracker (latest + optional prev)
-    const latest: number = data[0].scan_result?.overallScore ?? 0;
-    const prev: number | null = data.length >= 2 ? (data[1].scan_result?.overallScore ?? null) : null;
-    setScoreData({ latest, prev });
-
-    // Streak
+    const records: ScanRecord[] = data.map((r: any) => ({
+      date: r.created_at.slice(0, 10),
+      score: r.scan_result?.overallScore ?? 0,
+    }));
+    setScanRecords(records);
     setStreak(calculateStreak(data.map((r: any) => r.created_at)));
   };
 
@@ -130,6 +150,18 @@ export function HomeScreen() {
     try {
       const raw = await AsyncStorage.getItem(todayRoutineKey());
       if (raw) setRoutine(JSON.parse(raw));
+    } catch {}
+  };
+
+  const loadEventFromStorage = async () => {
+    if (eventType) return;
+    try {
+      const [[, storedType], [, storedDate], [, storedDirections]] =
+        await AsyncStorage.multiGet(['meve_event_type', 'meve_event_date', 'meve_care_direction']);
+      if (storedType) {
+        const directions = storedDirections ? JSON.parse(storedDirections) : [];
+        setEvent(storedType, storedDate ?? '', directions);
+      }
     } catch {}
   };
 
@@ -142,279 +174,590 @@ export function HomeScreen() {
   };
 
   // ── Derived ─────────────────────────────────────────────────────────────────
-  const greeting = displayName ? `${displayName}님 안녕하세요 :)` : '회원님 안녕하세요 :)';
-  const scoreDiff = scoreData?.prev != null ? scoreData.latest - scoreData.prev : null;
-  const bothDone = routine.am && routine.pm;
+  const greeting = displayName ? `${displayName}님 안녕하세요 :)` : '안녕하세요 :)';
+  const eventConfig = eventType ? EVENT_CONFIG[eventType as EventKey] : null;
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const ddayCount = eventDate
+    ? Math.ceil((new Date(eventDate).setHours(0, 0, 0, 0) - today.getTime()) / 86_400_000)
+    : null;
+
+  // Build scanMap for calendar: date string → score
+  const scanMap: Record<string, number> = {};
+  for (const r of scanRecords) {
+    if (!(r.date in scanMap) || scanMap[r.date] < r.score) {
+      scanMap[r.date] = r.score;
+    }
+  }
+
+  // Calendar grid
+  const daysInMonth = getDaysInMonth(calYear, calMonth);
+  const firstDay = getFirstDayOfMonth(calYear, calMonth);
+  const todayStr = now.toISOString().slice(0, 10);
+  const eventDateStr = eventDate ? eventDate.slice(0, 10) : null;
+
+  // Selected day scan info
+  const selectedDateStr = selectedDay
+    ? `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(selectedDay).padStart(2, '0')}`
+    : null;
+  const selectedScore = selectedDateStr ? scanMap[selectedDateStr] : undefined;
+
+  function scoreColor(score: number) {
+    if (score >= 80) return '#4CAF50';
+    if (score >= 60) return '#FFC107';
+    return '#F44336';
+  }
+
+  const prevMonth = () => {
+    if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); }
+    else setCalMonth(m => m - 1);
+    setSelectedDay(null);
+  };
+  const nextMonth = () => {
+    if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); }
+    else setCalMonth(m => m + 1);
+    setSelectedDay(null);
+  };
+
+  // Build 6-row grid cells
+  const totalCells = 42;
+  const cells: (number | null)[] = [
+    ...Array(firstDay).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+    ...Array(totalCells - firstDay - daysInMonth).fill(null),
+  ];
+
+  const cellSize = Math.floor((width - 40 - 32) / 7); // width - marginHorizontal*2 - padding*2
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor={Colors.bg} />
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FDF6F9" />
       <ScrollView
-        style={styles.container}
+        style={styles.scroll}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* 헤더 */}
+        {/* ── HEADER ─────────────────────────────────────────────────────── */}
         <View style={styles.header}>
           <Text style={styles.wordmark}>meve</Text>
+          <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="settings-outline" size={22} color="#999" />
+          </TouchableOpacity>
         </View>
 
-        {/* 인사 */}
-        <View style={styles.greetingRow}>
-          <Text style={styles.greeting}>{greeting}</Text>
-          <Text style={styles.greetingSub}>오늘의 피부 상태를 확인해 볼까요?</Text>
-        </View>
+        {/* ── GREETING ───────────────────────────────────────────────────── */}
+        <Text style={styles.greeting}>{greeting}</Text>
 
-        {/* 스킨 모드 선택 */}
-        <View style={styles.modeRow}>
-          {SKIN_MODES.map(({ key, emoji, label }) => {
-            const selected = skinMode === key;
-            return (
-              <TouchableOpacity
-                key={key}
-                style={[styles.modeCard, selected && styles.modeCardSelected]}
-                onPress={() => setSkinMode(key)}
-                activeOpacity={0.75}
+        {/* ── D-DAY HERO CARD ────────────────────────────────────────────── */}
+        {eventConfig && ddayCount != null ? (
+          <LinearGradient
+            colors={['#FFD6E7', '#C9B8FF']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.ddayCard}
+          >
+            <View style={styles.ddayTopRow}>
+              <Ionicons
+                name={eventType === 'wedding' ? 'diamond-outline' :
+                      eventType === 'date' ? 'heart-outline' :
+                      eventType === 'graduation' ? 'school-outline' :
+                      eventType === 'travel' ? 'airplane-outline' : 'sparkles-outline'}
+                size={20}
+                color="#fff"
+              />
+              <Text style={styles.ddayDateText}>{formatEventDate(eventDate!)}</Text>
+              <Ionicons name="sparkles" size={14} color="#fff" style={styles.ddaySparkles} />
+            </View>
+            <Text style={styles.ddayCount}>{eventConfig.label}까지 D-{ddayCount}</Text>
+            <Text style={styles.ddaySub}>특별한 날을 위해 준비해요</Text>
+            <TouchableOpacity
+              style={styles.ddayChangeBtn}
+              onPress={() => navigation.navigate('EventFlow')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.ddayChangeBtnText}>변경하기</Text>
+            </TouchableOpacity>
+          </LinearGradient>
+        ) : (
+          <LinearGradient
+            colors={['#FFD6E7', '#C9B8FF']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.ddayCard}
+          >
+            <Ionicons name="calendar-outline" size={28} color="rgba(255,255,255,0.9)" style={{ marginBottom: 10 }} />
+            <Text style={[styles.ddayCount, { fontSize: 20 }]}>특별한 날을 준비하고 있나요?</Text>
+            <Text style={styles.ddaySub}>이벤트를 설정하면 D-day를 함께 준비해드려요</Text>
+            <TouchableOpacity
+              style={styles.ddaySetBtn}
+              onPress={() => navigation.navigate('EventFlow')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.ddaySetBtnText}>이벤트를 설정해봐요 →</Text>
+            </TouchableOpacity>
+          </LinearGradient>
+        )}
+
+        {/* ── CALENDAR ───────────────────────────────────────────────────── */}
+        <Text style={styles.sectionTitle}>피부 기록</Text>
+        <View style={styles.calendarCard}>
+          {/* Month nav */}
+          <View style={styles.calMonthRow}>
+            <TouchableOpacity onPress={prevMonth} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="chevron-back" size={18} color="#999" />
+            </TouchableOpacity>
+            <Text style={styles.calMonthText}>{calYear}년 {calMonth + 1}월</Text>
+            <TouchableOpacity onPress={nextMonth} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="chevron-forward" size={18} color="#999" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Day headers */}
+          <View style={styles.calDayHeaders}>
+            {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
+              <Text
+                key={d}
+                style={[
+                  styles.calDayHeader,
+                  i === 0 && { color: '#FF6B6B' },
+                  i === 6 && { color: '#74B9FF' },
+                ]}
               >
-                <Text style={styles.modeEmoji}>{emoji}</Text>
-                <Text style={[styles.modeLabel, selected && styles.modeLabelSelected]}>
-                  {label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+                {d}
+              </Text>
+            ))}
+          </View>
 
-        {/* ── 1. 피부 점수 트래커 ─────────────────────────────────────────── */}
-        {scoreData && (
-          <View style={styles.padded}>
-            <View style={styles.scoreCard}>
-              <View>
-                <Text style={styles.scoreLabel}>최근 피부 점수</Text>
-                <Text style={styles.scoreValue}>{scoreData.latest}점</Text>
-              </View>
-              {scoreDiff != null && (
-                <Text style={[styles.scoreDiff, { color: scoreDiff > 0 ? Colors.success : scoreDiff < 0 ? Colors.danger : Colors.textSecondary }]}>
-                  {scoreDiff > 0 ? '📈' : scoreDiff < 0 ? '📉' : '➖'}{' '}
-                  지난 스캔보다{' '}
-                  {scoreDiff > 0 ? `+${scoreDiff}점 올랐어요` : scoreDiff < 0 ? `${scoreDiff}점 내려갔어요` : '동일해요'}
+          {/* Grid */}
+          <View style={styles.calGrid}>
+            {cells.map((day, idx) => {
+              if (day === null) {
+                return <View key={`empty-${idx}`} style={[styles.calCell, { width: cellSize }]} />;
+              }
+
+              const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              const isToday = dateStr === todayStr;
+              const isSelected = day === selectedDay;
+              const isDday = dateStr === eventDateStr;
+              const score = scanMap[dateStr];
+              const colIdx = idx % 7;
+
+              return (
+                <TouchableOpacity
+                  key={dateStr}
+                  style={[styles.calCell, { width: cellSize }]}
+                  onPress={() => setSelectedDay(day === selectedDay ? null : day)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[
+                    styles.calDayCircle,
+                    { width: cellSize - 4, height: cellSize - 4 },
+                    isToday && styles.calDayCircleToday,
+                    isSelected && !isToday && styles.calDayCircleSelected,
+                  ]}>
+                    <Text style={[
+                      styles.calDayNum,
+                      colIdx === 0 && { color: '#FF6B6B' },
+                      colIdx === 6 && { color: '#74B9FF' },
+                      isToday && { color: '#fff', fontWeight: '700' },
+                      isSelected && !isToday && { color: '#F2A7C3', fontWeight: '700' },
+                    ]}>
+                      {day}
+                    </Text>
+                    {isDday && eventConfig && (
+                      <View style={styles.calDdayBadge}>
+                        <Ionicons
+                          name={eventType === 'wedding' ? 'diamond' :
+                                eventType === 'date' ? 'heart' :
+                                eventType === 'graduation' ? 'school' : 'airplane'}
+                          size={8}
+                          color={eventConfig.accentColor}
+                        />
+                      </View>
+                    )}
+                  </View>
+                  {score !== undefined ? (
+                    <View style={[styles.calDot, { backgroundColor: scoreColor(score) }]} />
+                  ) : (
+                    <View style={styles.calDotEmpty} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Selected day info */}
+          {selectedDateStr && (
+            <View style={styles.calSelectedInfo}>
+              {selectedScore !== undefined ? (
+                <View style={styles.calSelectedScore}>
+                  <View style={[styles.calSelectedDot, { backgroundColor: scoreColor(selectedScore) }]} />
+                  <Text style={styles.calSelectedText}>
+                    {calMonth + 1}월 {selectedDay}일 피부 점수: <Text style={{ fontWeight: '700', color: '#2D2D2D' }}>{selectedScore}점</Text>
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.calSelectedEmpty}>
+                  {calMonth + 1}월 {selectedDay}일 — 스캔 기록이 없어요
                 </Text>
               )}
             </View>
-          </View>
-        )}
-
-        {/* ── 2. 루틴 체크인 ──────────────────────────────────────────────── */}
-        <View style={styles.padded}>
-          <View style={styles.routineCard}>
-            <Text style={styles.routineTitle}>오늘의 루틴</Text>
-            {bothDone ? (
-              <Text style={styles.routineAllDone}>오늘 루틴 모두 완료했어요 🎉</Text>
-            ) : (
-              <View style={styles.routineBtns}>
-                <TouchableOpacity
-                  style={[styles.routineBtn, routine.am && styles.routineBtnDone]}
-                  onPress={() => toggleRoutine('am')}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[styles.routineBtnText, routine.am && styles.routineBtnTextDone]}>
-                    {routine.am ? '✓ ' : ''}☀️ AM 루틴
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.routineBtn, routine.pm && styles.routineBtnDone]}
-                  onPress={() => toggleRoutine('pm')}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[styles.routineBtnText, routine.pm && styles.routineBtnTextDone]}>
-                    {routine.pm ? '✓ ' : ''}🌙 PM 루틴
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
+          )}
         </View>
 
-        {/* ── 3. 스캔 스트릭 ──────────────────────────────────────────────── */}
-        {streak !== null && (
-          <View style={styles.padded}>
-            <View style={[styles.streakBanner, streak === 0 && styles.streakBannerEmpty]}>
-              <Text style={styles.streakText}>
-                {streak >= 1
-                  ? `🔥 ${streak}일 연속 스캔 중!`
-                  : '오늘 첫 스캔을 시작해보세요! 🩷'}
-              </Text>
+        {/* ── AM/PM ROUTINE ──────────────────────────────────────────────── */}
+        <View style={styles.routineRow}>
+          {/* AM */}
+          <TouchableOpacity
+            style={[styles.routineCard, routine.am && styles.routineCardAmDone]}
+            onPress={() => toggleRoutine('am')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="sunny-outline" size={24} color={routine.am ? '#F2A7C3' : '#ccc'} />
+            <Text style={styles.routineLabel}>AM 루틴</Text>
+            <View style={[
+              styles.routineCheckCircle,
+              routine.am && { backgroundColor: '#F2A7C3', borderWidth: 0 },
+            ]}>
+              {routine.am && <Ionicons name="checkmark" size={13} color="#fff" />}
             </View>
-          </View>
+          </TouchableOpacity>
+
+          {/* PM */}
+          <TouchableOpacity
+            style={[styles.routineCard, routine.pm && styles.routineCardPmDone]}
+            onPress={() => toggleRoutine('pm')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="moon-outline" size={24} color={routine.pm ? '#A8D5E8' : '#ccc'} />
+            <Text style={styles.routineLabel}>PM 루틴</Text>
+            <View style={[
+              styles.routineCheckCircle,
+              routine.pm && { backgroundColor: '#A8D5E8', borderWidth: 0 },
+            ]}>
+              {routine.pm && <Ionicons name="checkmark" size={13} color="#fff" />}
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* ── STREAK BANNER ──────────────────────────────────────────────── */}
+        {streak > 0 && (
+          <LinearGradient
+            colors={['#FFE4A0', '#FFD57E']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.streakBanner}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="flame" size={18} color="#B8860B" />
+              <Text style={styles.streakTitle}>{streak}일 연속 스캔 중!</Text>
+            </View>
+            <Text style={styles.streakSub}>꾸준히 기록하고 있어요</Text>
+          </LinearGradient>
         )}
 
-        {/* 히어로 카드 — 피부 진단 */}
+        {/* ── SCAN HERO CARD ─────────────────────────────────────────────── */}
         <TouchableOpacity
-          style={styles.heroCard}
+          style={styles.scanHero}
           activeOpacity={0.85}
-          onPress={() => navigation.navigate('AIScan')}
+          onPress={() => navigation.navigate('Skin')}
         >
-          <View style={styles.heroInner}>
-            <Text style={styles.heroEmoji}>🩷</Text>
-            <View style={styles.heroText}>
-              <Text style={styles.heroTitle}>지금 피부 진단하기</Text>
-              <Text style={styles.heroDesc}>AI가 내 피부 상태를 분석해드려요</Text>
-            </View>
-            <Text style={styles.heroArrow}>→</Text>
+          <Ionicons name="scan-outline" size={28} color="#fff" />
+          <View style={styles.scanHeroText}>
+            <Text style={styles.scanHeroTitle}>지금 피부 진단하기</Text>
+            <Text style={styles.scanHeroDesc}>AI가 내 피부 상태를 분석해드려요</Text>
           </View>
+          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
         </TouchableOpacity>
 
-        {/* 최근 활동 */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>최근 활동</Text>
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyEmoji}>🩷</Text>
-            <Text style={styles.emptyText}>
-              첫 피부 진단을 시작하면{'\n'}활동 기록이 여기에 쌓여요
-            </Text>
-          </View>
-        </View>
+        <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: Colors.bg },
-  container: { flex: 1 },
-  content: { paddingBottom: 40 },
-  padded: { paddingHorizontal: Spacing.xl, marginBottom: Spacing.md },
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
+const PAGE_BG = '#FDF6F9';
+const CARD_BG = '#FFFFFF';
+const PINK = '#F2A7C3';
+
+const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: PAGE_BG },
+  scroll: { flex: 1, backgroundColor: PAGE_BG },
+  content: { paddingBottom: 20 },
+
+  // Header
   header: {
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.md,
-    paddingBottom: Spacing.sm,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
   wordmark: {
-    fontSize: 20,
+    fontSize: 22,
+    fontWeight: '700',
+    color: PINK,
+    letterSpacing: -0.5,
+  },
+
+  // Greeting
+  greeting: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: '#2D2D2D',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+
+  // D-Day card
+  ddayCard: {
+    marginHorizontal: 20,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 20,
+  },
+  ddayTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+
+  ddayDateText: {
+    fontSize: 13,
+    color: '#fff',
+    marginLeft: 8,
+    opacity: 0.9,
+    flex: 1,
+  },
+  ddaySparkles: { marginLeft: 'auto' as any },
+  ddayCount: {
+    fontSize: 28,
     fontWeight: '800',
-    color: Colors.accent,
-    letterSpacing: 4,
+    color: '#fff',
+    marginBottom: 4,
+  },
+  ddaySub: {
+    fontSize: 13,
+    color: '#fff',
+    opacity: 0.85,
+    marginBottom: 12,
+  },
+  ddayChangeBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  ddayChangeBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  ddaySetBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.35)',
+    marginTop: 4,
+  },
+  ddaySetBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#fff',
   },
 
-  greetingRow: {
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.lg,
+  // Calendar
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#2D2D2D',
+    paddingHorizontal: 20,
+    marginBottom: 10,
   },
-  greeting: { ...Typography.h2, marginBottom: 4 },
-  greetingSub: { ...Typography.bodySecondary },
-
-  // Mode selector
-  modeRow: {
+  calendarCard: {
+    marginHorizontal: 20,
+    backgroundColor: CARD_BG,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: PINK,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  calMonthRow: {
     flexDirection: 'row',
-    paddingHorizontal: Spacing.xl,
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  modeCard: {
-    flex: 1,
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: Spacing.sm,
-    borderRadius: Radius.md,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-    gap: 4,
+    marginBottom: 12,
   },
-  modeCardSelected: {
-    borderColor: Colors.accent,
-    backgroundColor: Colors.accentMuted,
+  calMonthText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2D2D2D',
   },
-  modeEmoji: { fontSize: 20 },
-  modeLabel: { ...Typography.caption, color: Colors.textSecondary, fontWeight: '500' },
-  modeLabelSelected: { color: Colors.accent, fontWeight: '600' },
+  calDayHeaders: {
+    flexDirection: 'row',
+    marginBottom: 6,
+  },
+  calDayHeader: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 11,
+    color: '#999',
+    fontWeight: '500',
+  },
+  calGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  calCell: {
+    alignItems: 'center',
+    paddingVertical: 3,
+  },
+  calDayCircle: {
+    borderRadius: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calDayCircleToday: {
+    backgroundColor: PINK,
+  },
+  calDayCircleSelected: {
+    backgroundColor: '#FFE8F3',
+  },
+  calDayNum: {
+    fontSize: 13,
+    color: '#2D2D2D',
+  },
+  calDdayBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+  },
+  calDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    marginTop: 2,
+  },
+  calDotEmpty: {
+    width: 5,
+    height: 5,
+    marginTop: 2,
+  },
+  calSelectedInfo: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F5EEF3',
+  },
+  calSelectedScore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  calSelectedDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  calSelectedText: {
+    fontSize: 13,
+    color: '#666',
+  },
+  calSelectedEmpty: {
+    fontSize: 13,
+    color: '#aaa',
+    textAlign: 'center',
+  },
 
-  // Score tracker
-  scoreCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.md,
-    gap: 6,
+  // Routine
+  routineRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    gap: 12,
+    marginBottom: 14,
   },
-  scoreLabel: { ...Typography.caption, color: Colors.textSecondary },
-  scoreValue: { fontSize: 22, fontWeight: '700', color: Colors.textPrimary },
-  scoreDiff: { fontSize: 13, fontWeight: '500', lineHeight: 18 },
-
-  // Routine check-in
   routineCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.md,
-    gap: Spacing.sm,
-  },
-  routineTitle: { ...Typography.caption, color: Colors.textSecondary, fontWeight: '600' },
-  routineBtns: { flexDirection: 'row', gap: Spacing.sm },
-  routineBtn: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: Radius.sm,
+    backgroundColor: CARD_BG,
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F0E6EC',
+    gap: 8,
+  },
+  routineCardAmDone: {
+    backgroundColor: '#FFF0F6',
+    borderColor: PINK,
+  },
+  routineCardPmDone: {
+    backgroundColor: '#F0F6FF',
+    borderColor: '#A8D5E8',
+  },
+  routineLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2D2D2D',
+  },
+  routineCheckCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 1.5,
-    borderColor: Colors.border,
+    borderColor: '#ddd',
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
   },
-  routineBtnDone: {
-    backgroundColor: Colors.accent,
-    borderColor: Colors.accent,
-  },
-  routineBtnText: { fontSize: 13, fontWeight: '500', color: Colors.textSecondary },
-  routineBtnTextDone: { color: Colors.surface, fontWeight: '600' },
-  routineAllDone: { fontSize: 14, fontWeight: '600', color: Colors.success },
 
-  // Streak banner
+  // Streak
   streakBanner: {
-    backgroundColor: Colors.accent,
-    borderRadius: Radius.md,
-    paddingVertical: 10,
-    paddingHorizontal: Spacing.md,
-    alignItems: 'center',
+    marginHorizontal: 20,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 14,
   },
-  streakBannerEmpty: {
-    backgroundColor: Colors.accentLight,
+  streakTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#B8860B',
   },
-  streakText: { fontSize: 14, fontWeight: '600', color: Colors.surface },
+  streakSub: {
+    fontSize: 12,
+    color: '#B8860B',
+    opacity: 0.8,
+    marginTop: 2,
+  },
 
-  // Hero card
-  heroCard: {
-    marginHorizontal: Spacing.xl,
-    backgroundColor: Colors.accent,
-    borderRadius: Radius.lg,
-    marginBottom: Spacing.xl,
-  },
-  heroInner: {
+  // Scan hero
+  scanHero: {
+    marginHorizontal: 20,
+    backgroundColor: PINK,
+    borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: Spacing.lg,
-    gap: Spacing.md,
+    padding: 18,
+    gap: 14,
   },
-  heroEmoji: { fontSize: 32 },
-  heroText: { flex: 1 },
-  heroTitle: { fontSize: 16, fontWeight: '700', color: Colors.surface, marginBottom: 2 },
-  heroDesc: { fontSize: 13, color: Colors.surface, opacity: 0.85 },
-  heroArrow: { fontSize: 20, color: Colors.surface, opacity: 0.7 },
-
-  // Recent activity
-  section: { paddingHorizontal: Spacing.xl },
-  sectionTitle: { ...Typography.h3, marginBottom: Spacing.md },
-  emptyCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingVertical: Spacing.xl,
-    alignItems: 'center',
-    gap: Spacing.sm,
+  scanHeroText: { flex: 1 },
+  scanHeroTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 2,
   },
-  emptyEmoji: { fontSize: 32 },
-  emptyText: { ...Typography.bodySecondary, textAlign: 'center', lineHeight: 22 },
+  scanHeroDesc: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.85)',
+  },
 });

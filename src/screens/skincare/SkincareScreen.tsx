@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import {
   View,
   Text,
@@ -11,13 +12,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
 import { supabase } from '../../services/supabase';
-import { MainTabParamList, ScanAnalysisResult } from '../../types';
+import { AIScanStackParamList, ScanAnalysisResult } from '../../types';
 
-type Nav = BottomTabNavigationProp<MainTabParamList, 'Skincare'>;
+type Nav = NativeStackNavigationProp<AIScanStackParamList, 'SkinHome'>;
 
 // ─── Local types ────────────────────────────────────────────────────────────
 
@@ -231,6 +232,20 @@ export function SkincareScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* AI 피부 스캔 버튼 */}
+      <TouchableOpacity
+        style={styles.scanHero}
+        onPress={() => navigation.navigate('FaceScanner')}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="scan-outline" size={32} color="#fff" />
+        <View style={styles.scanHeroText}>
+          <Text style={styles.scanHeroTitle}>AI 피부 스캔</Text>
+          <Text style={styles.scanHeroDesc}>AI가 피부 상태를 분석해드려요</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+      </TouchableOpacity>
+
       {/* 탭 스위처 */}
       <View style={styles.tabSwitcher}>
         {TABS.map((tab, i) => (
@@ -260,14 +275,14 @@ export function SkincareScreen() {
             </View>
           ) : !latestScan ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyEmoji}>🩷</Text>
+              <Ionicons name="heart-outline" size={32} color={Colors.accentMuted} />
               <Text style={styles.emptyTitle}>스캔 결과가 없어요</Text>
               <Text style={styles.emptyDesc}>
                 먼저 AI 피부 스캔을 해주세요.{'\n'}맞춤 성분 추천을 드릴게요!
               </Text>
               <TouchableOpacity
                 style={styles.primaryBtn}
-                onPress={() => navigation.navigate('AIScan')}
+                onPress={() => navigation.navigate('FaceScanner')}
               >
                 <Text style={styles.primaryBtnText}>AI 피부 스캔하기 →</Text>
               </TouchableOpacity>
@@ -405,7 +420,7 @@ export function SkincareScreen() {
           {/* 권한 없음 */}
           {!cameraPermission?.granted ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyEmoji}>🩷</Text>
+              <Ionicons name="heart-outline" size={32} color={Colors.accentMuted} />
               <Text style={styles.emptyTitle}>카메라 권한이 필요해요</Text>
               <Text style={styles.emptyDesc}>제품 성분표를 스캔하려면{'\n'}카메라 권한을 허용해 주세요.</Text>
               <TouchableOpacity style={styles.primaryBtn} onPress={requestCameraPermission}>
@@ -504,6 +519,20 @@ export function SkincareScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.bg },
+
+  // AI 스캔 히어로 버튼
+  scanHero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.accent,
+    borderRadius: Radius.lg,
+    margin: Spacing.md,
+    padding: Spacing.lg,
+    gap: Spacing.md,
+  },
+  scanHeroText: { flex: 1, gap: 2 },
+  scanHeroTitle: { fontSize: 18, fontWeight: '700', color: '#fff' },
+  scanHeroDesc: { fontSize: 13, color: '#fff', opacity: 0.85 },
   scroll: { flex: 1 },
   scrollContent: {
     paddingHorizontal: Spacing.xl,

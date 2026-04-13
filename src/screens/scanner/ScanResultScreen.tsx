@@ -182,13 +182,6 @@ export function ScanResultScreen() {
         {/* 하단 버튼 */}
         <View style={styles.buttons}>
           <TouchableOpacity
-            style={styles.retryBtn}
-            onPress={() => navigation.goBack()}
-          >
-            <Text style={styles.retryBtnText}>다시 스캔하기</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
             style={[styles.saveBtn, (saved || saving) && styles.saveBtnDone]}
             onPress={handleSave}
             disabled={saved || saving}
@@ -196,6 +189,21 @@ export function ScanResultScreen() {
             <Text style={styles.saveBtnText}>
               {saved ? '저장됐어요 ✓' : saving ? '저장 중...' : '결과 저장하기'}
             </Text>
+          </TouchableOpacity>
+        </View>
+        <View style={[styles.buttons, styles.buttonsBottom]}>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.retryBtnText}>다시 스캔하기</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.homeBtn}
+            onPress={() => navigation.navigate('MainTabs')}
+          >
+            <Text style={styles.retryBtnText}>홈으로</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -209,7 +217,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.lg,
-    paddingBottom: Spacing.xxl,
+    paddingBottom: 100,
     gap: Spacing.lg,
   },
 
@@ -337,12 +345,22 @@ const styles = StyleSheet.create({
 
   // 버튼
   buttons: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.sm },
+  buttonsBottom: { marginBottom: 80 },
   retryBtn: {
     flex: 1,
     height: 52,
     borderRadius: Radius.md,
     borderWidth: 1.5,
     borderColor: Colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homeBtn: {
+    flex: 1,
+    height: 52,
+    borderRadius: Radius.md,
+    borderWidth: 1.5,
+    borderColor: Colors.textSecondary,
     alignItems: 'center',
     justifyContent: 'center',
   },

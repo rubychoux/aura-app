@@ -13,13 +13,14 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { OnboardingStackParamList } from '../../types';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 import { PrimaryButton } from '../../components/ui';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'Welcome'>;
 
 interface Slide {
   id: string;
-  emoji: string;
+  icon: keyof typeof Ionicons.glyphMap;
   title: string;
   description: string;
   accent: string;
@@ -28,23 +29,23 @@ interface Slide {
 const SLIDES: Slide[] = [
   {
     id: '1',
-    emoji: '🔍',
-    title: '왜 내 피부가 이래요?',
-    description: 'AI가 내 피부를 정확히 진단해 드려요.',
+    icon: 'sparkles-outline',
+    title: '특별한 그 날,',
+    description: '완벽한 내가 되고 싶다면',
     accent: Colors.accent,
   },
   {
     id: '2',
-    emoji: '🧴',
-    title: '내 피부에 맞는 성분만',
-    description: '수천 개 성분 중 나에게 맞는 것만 골라드려요.',
+    icon: 'calendar-outline',
+    title: 'D-day까지 피부를 가꾸고',
+    description: '나만의 룩을 완성해요',
     accent: Colors.success,
   },
   {
     id: '3',
-    emoji: '📅',
-    title: 'AI가 처방하는 나만의 30일 루틴',
-    description: 'AI 코치가 루틴을 함께 만들어 드려요.',
+    icon: 'scan-outline',
+    title: 'AI가 피부를 분석하고',
+    description: '당신만의 뷰티 여정을 설계해드려요',
     accent: Colors.accent,
   },
 ];
@@ -101,7 +102,7 @@ export function WelcomeScreen() {
         renderItem={({ item }) => (
           <View style={[styles.slide, { width }]}>
             <View style={[styles.emojiCircle, { backgroundColor: item.accent + '18' }]}>
-              <Text style={styles.slideEmoji}>{item.emoji}</Text>
+              <Ionicons name={item.icon} size={52} color={item.accent} />
             </View>
             <Text style={styles.slideTitle}>{item.title}</Text>
             <Text style={styles.slideDesc}>{item.description}</Text>
@@ -174,7 +175,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: Spacing.sm,
   },
-  slideEmoji: { fontSize: 52 },
   slideTitle: {
     ...Typography.h1,
     textAlign: 'center',

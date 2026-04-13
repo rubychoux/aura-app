@@ -10,12 +10,19 @@ interface AuthState {
   hasCompletedOnboarding: boolean;
   skinMode: SkinMode;
 
+  // Event setup
+  eventType: string | null;
+  eventDate: string | null;
+  careDirections: string[];
+
   setUser: (user: UserProfile | null) => void;
   setSession: (session: { accessToken: string } | null) => void;
   setLoading: (val: boolean) => void;
   setOnboardingComplete: () => void;
   updateProfile: (updates: Partial<UserProfile>) => void;
   setSkinMode: (mode: SkinMode) => void;
+  setEvent: (type: string, date: string, directions: string[]) => void;
+  clearEvent: () => void;
   signOut: () => void;
 }
 
@@ -25,6 +32,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true,
   hasCompletedOnboarding: false,
   skinMode: 'everyday',
+  eventType: null,
+  eventDate: null,
+  careDirections: [],
 
   setUser: (user) => set({ user }),
   setSession: (session) => set({ session }),
@@ -35,7 +45,17 @@ export const useAuthStore = create<AuthState>((set) => ({
       user: state.user ? { ...state.user, ...updates } : null,
     })),
   setSkinMode: (skinMode) => set({ skinMode }),
-  signOut: () => set({ user: null, session: null, hasCompletedOnboarding: false, skinMode: 'everyday' }),
+  setEvent: (eventType, eventDate, careDirections) => set({ eventType, eventDate, careDirections }),
+  clearEvent: () => set({ eventType: null, eventDate: null, careDirections: [] }),
+  signOut: () => set({
+    user: null,
+    session: null,
+    hasCompletedOnboarding: false,
+    skinMode: 'everyday',
+    eventType: null,
+    eventDate: null,
+    careDirections: [],
+  }),
 }));
 
 // ─── Onboarding Survey Store ──────────────────────────────────────────────────

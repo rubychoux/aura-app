@@ -8,6 +8,7 @@ import {
   ViewStyle,
   TextStyle,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
 
 // ─── PrimaryButton ────────────────────────────────────────────────────────────
@@ -140,7 +141,7 @@ interface StreakProps {
 export function StreakBadge({ days }: StreakProps) {
   return (
     <View style={styles.streakContainer}>
-      <Text style={styles.streakEmoji}>🔥</Text>
+      <Ionicons name="flame-outline" size={18} color={Colors.accent} />
       <Text style={styles.streakText}>{days}일 연속 로그 중</Text>
     </View>
   );
@@ -290,7 +291,6 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
     alignSelf: 'flex-start',
   },
-  streakEmoji: { fontSize: 14 },
   streakText: { ...Typography.caption, color: Colors.textPrimary, fontWeight: '600' },
 
   // Divider

@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
 import { supabase } from '../../services/supabase';
 import { useAuthStore } from '../../store';
@@ -103,7 +104,7 @@ export function MyPageScreen() {
           <Text style={styles.sectionTitle}>내 스캔 이력</Text>
           {scans.length === 0 ? (
             <View style={styles.emptyCard}>
-              <Text style={styles.emptyEmoji}>🩷</Text>
+              <Ionicons name="heart-outline" size={32} color={Colors.accentMuted} />
               <Text style={styles.emptyText}>
                 아직 스캔 기록이 없어요.{'\n'}AI 스캐너로 첫 진단을 시작해보세요!
               </Text>
