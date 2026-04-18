@@ -13,6 +13,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
+import { HARDCODED_ROUTINE, summarizeRoutineSteps } from '../../constants/routine';
+import {
+  loadRoutineCheckin,
+  loadRoutineCheckinsForDates,
+  routineCheckinStorageKey,
+  RoutineCheckin,
+} from '../../utils/routineCheckin';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { CompositeNavigationProp } from '@react-navigation/native';
@@ -47,10 +54,6 @@ function calculateStreak(isoDates: string[]): number {
     }
   }
   return streak;
-}
-
-function todayRoutineKey() {
-  return `meve_routine_${new Date().toISOString().slice(0, 10)}`;
 }
 
 function getDaysInMonth(year: number, month: number) {
@@ -90,6 +93,7 @@ export function HomeScreen() {
   const [scanRecords, setScanRecords] = useState<ScanRecord[]>([]);
   const [streak, setStreak] = useState<number>(0);
   const [routine, setRoutine] = useState<Routine>({ am: false, pm: false });
+  const [routineByDate, setRoutineByDate] = useState<Record<string, RoutineCheckin>>({});
 
   // Calendar state
   const now = new Date();
@@ -111,6 +115,23 @@ export function HomeScreen() {
     );
     return () => subscription.unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const daysInMonthForEffect = getDaysInMonth(calYear, calMonth);
+  useEffect(() => {
+    const dates: string[] = [];
+    for (let d = 1; d <= daysInMonthForEffect; d++) {
+      dates.push(
+        `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+      );
+    }
+    let cancelled = false;
+    loadRoutineCheckinsForDates(dates).then((map) => {
+      if (!cancelled) setRoutineByDate(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [calYear, calMonth, daysInMonthForEffect]);
 
   const loadProfile = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -147,10 +168,9 @@ export function HomeScreen() {
   };
 
   const loadRoutine = async () => {
-    try {
-      const raw = await AsyncStorage.getItem(todayRoutineKey());
-      if (raw) setRoutine(JSON.parse(raw));
-    } catch {}
+    const today = new Date().toISOString().slice(0, 10);
+    const checkin = await loadRoutineCheckin(today);
+    setRoutine(checkin);
   };
 
   const loadEventFromStorage = async () => {
@@ -168,8 +188,10 @@ export function HomeScreen() {
   const toggleRoutine = async (type: 'am' | 'pm') => {
     const next = { ...routine, [type]: !routine[type] };
     setRoutine(next);
+    const today = new Date().toISOString().slice(0, 10);
     try {
-      await AsyncStorage.setItem(todayRoutineKey(), JSON.stringify(next));
+      await AsyncStorage.setItem(routineCheckinStorageKey(today), JSON.stringify(next));
+      setRoutineByDate((prev) => ({ ...prev, [today]: next }));
     } catch {}
   };
 
@@ -195,6 +217,9 @@ export function HomeScreen() {
   const firstDay = getFirstDayOfMonth(calYear, calMonth);
   const todayStr = now.toISOString().slice(0, 10);
   const eventDateStr = eventDate ? eventDate.slice(0, 10) : null;
+
+  const amStepSummary = summarizeRoutineSteps(HARDCODED_ROUTINE.am_steps);
+  const pmStepSummary = summarizeRoutineSteps(HARDCODED_ROUTINE.pm_steps);
 
   // Selected day scan info
   const selectedDateStr = selectedDay
@@ -342,6 +367,7 @@ export function HomeScreen() {
               const isDday = dateStr === eventDateStr;
               const score = scanMap[dateStr];
               const colIdx = idx % 7;
+              const dayRoutine = routineByDate[dateStr];
 
               return (
                 <TouchableOpacity
@@ -382,6 +408,18 @@ export function HomeScreen() {
                   ) : (
                     <View style={styles.calDotEmpty} />
                   )}
+                  <View style={styles.calRoutineRow}>
+                    {dayRoutine?.am ? (
+                      <View style={[styles.calRoutineDot, { backgroundColor: PINK }]} />
+                    ) : (
+                      <View style={styles.calRoutineDotEmpty} />
+                    )}
+                    {dayRoutine?.pm ? (
+                      <View style={[styles.calRoutineDot, { backgroundColor: '#A8D5E8' }]} />
+                    ) : (
+                      <View style={styles.calRoutineDotEmpty} />
+                    )}
+                  </View>
                 </TouchableOpacity>
               );
             })}
@@ -407,6 +445,7 @@ export function HomeScreen() {
         </View>
 
         {/* ── AM/PM ROUTINE ──────────────────────────────────────────────── */}
+        <Text style={styles.sectionTitle}>오늘 루틴 체크</Text>
         <View style={styles.routineRow}>
           {/* AM */}
           <TouchableOpacity
@@ -414,14 +453,25 @@ export function HomeScreen() {
             onPress={() => toggleRoutine('am')}
             activeOpacity={0.8}
           >
-            <Ionicons name="sunny-outline" size={24} color={routine.am ? '#F2A7C3' : '#ccc'} />
-            <Text style={styles.routineLabel}>AM 루틴</Text>
-            <View style={[
-              styles.routineCheckCircle,
-              routine.am && { backgroundColor: '#F2A7C3', borderWidth: 0 },
-            ]}>
-              {routine.am && <Ionicons name="checkmark" size={13} color="#fff" />}
+            <View style={styles.routineCardTop}>
+              <Ionicons name="sunny-outline" size={24} color={routine.am ? '#F2A7C3' : '#ccc'} />
+              <Text style={styles.routineLabel}>AM 루틴</Text>
+              <View style={[
+                styles.routineCheckCircle,
+                routine.am && { backgroundColor: '#F2A7C3', borderWidth: 0 },
+              ]}>
+                {routine.am && <Ionicons name="checkmark" size={13} color="#fff" />}
+              </View>
             </View>
+            {routine.am ? (
+              <Text style={styles.routineSummary} numberOfLines={4}>
+                {amStepSummary}
+              </Text>
+            ) : (
+              <Text style={styles.routineHint} numberOfLines={2}>
+                완료 시 순서가 표시돼요
+              </Text>
+            )}
           </TouchableOpacity>
 
           {/* PM */}
@@ -430,14 +480,25 @@ export function HomeScreen() {
             onPress={() => toggleRoutine('pm')}
             activeOpacity={0.8}
           >
-            <Ionicons name="moon-outline" size={24} color={routine.pm ? '#A8D5E8' : '#ccc'} />
-            <Text style={styles.routineLabel}>PM 루틴</Text>
-            <View style={[
-              styles.routineCheckCircle,
-              routine.pm && { backgroundColor: '#A8D5E8', borderWidth: 0 },
-            ]}>
-              {routine.pm && <Ionicons name="checkmark" size={13} color="#fff" />}
+            <View style={styles.routineCardTop}>
+              <Ionicons name="moon-outline" size={24} color={routine.pm ? '#A8D5E8' : '#ccc'} />
+              <Text style={styles.routineLabel}>PM 루틴</Text>
+              <View style={[
+                styles.routineCheckCircle,
+                routine.pm && { backgroundColor: '#A8D5E8', borderWidth: 0 },
+              ]}>
+                {routine.pm && <Ionicons name="checkmark" size={13} color="#fff" />}
+              </View>
             </View>
+            {routine.pm ? (
+              <Text style={styles.routineSummary} numberOfLines={4}>
+                {pmStepSummary}
+              </Text>
+            ) : (
+              <Text style={styles.routineHint} numberOfLines={2}>
+                완료 시 순서가 표시돼요
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -653,6 +714,25 @@ const styles = StyleSheet.create({
     height: 5,
     marginTop: 2,
   },
+  calRoutineRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 3,
+    marginTop: 2,
+    height: 5,
+    alignItems: 'center',
+  },
+  calRoutineDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+  },
+  calRoutineDotEmpty: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'transparent',
+  },
   calSelectedInfo: {
     marginTop: 12,
     paddingTop: 12,
@@ -691,10 +771,26 @@ const styles = StyleSheet.create({
     backgroundColor: CARD_BG,
     borderRadius: 16,
     padding: 16,
-    alignItems: 'center',
+    alignItems: 'stretch',
     borderWidth: 1,
     borderColor: '#F0E6EC',
     gap: 8,
+  },
+  routineCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  routineSummary: {
+    fontSize: 11,
+    color: '#666',
+    lineHeight: 15,
+  },
+  routineHint: {
+    fontSize: 11,
+    color: '#bbb',
+    lineHeight: 15,
   },
   routineCardAmDone: {
     backgroundColor: '#FFF0F6',
@@ -705,6 +801,7 @@ const styles = StyleSheet.create({
     borderColor: '#A8D5E8',
   },
   routineLabel: {
+    flex: 1,
     fontSize: 13,
     fontWeight: '600',
     color: '#2D2D2D',

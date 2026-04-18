@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -13,11 +13,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
+import { Colors, Spacing, Radius } from '../../constants/theme';
 import { supabase } from '../../services/supabase';
 import { AIScanStackParamList, ScanAnalysisResult } from '../../types';
+import { HARDCODED_ROUTINE, oliveYoungSearchUrl, RoutineStep } from '../../constants/routine';
+import { loadRoutineCheckin, RoutineCheckin } from '../../utils/routineCheckin';
 
 type Nav = NativeStackNavigationProp<AIScanStackParamList, 'SkinHome'>;
 
@@ -68,8 +70,8 @@ export function SkincareScreen() {
   const [ingredientResult, setIngredientResult] = useState<IngredientResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // Routine
-  const [routineData, setRoutineData] = useState<any>(null);
+  // Routine (check-in state for today; steps from HARDCODED_ROUTINE until Sprint 3)
+  const [routineCheckin, setRoutineCheckin] = useState<RoutineCheckin>({ am: false, pm: false });
   const [routineTab, setRoutineTab] = useState<'am' | 'pm'>('am');
 
   const daysLeft = eventDate
@@ -85,6 +87,12 @@ export function SkincareScreen() {
     loadCachedIngredients();
     loadRoutine();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadRoutine();
+    }, [])
+  );
 
   const loadEvent = async () => {
     try {
@@ -123,11 +131,9 @@ export function SkincareScreen() {
   };
 
   const loadRoutine = async () => {
-    try {
-      const today = new Date().toISOString().slice(0, 10);
-      const raw = await AsyncStorage.getItem(`meve_routine_${today}`);
-      if (raw) setRoutineData(JSON.parse(raw));
-    } catch {}
+    const today = new Date().toISOString().slice(0, 10);
+    const checkin = await loadRoutineCheckin(today);
+    setRoutineCheckin(checkin);
   };
 
   // ── Ingredient analysis ─────────────────────────────────────────────────────
@@ -320,58 +326,83 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
           ) : null}
         </View>
 
-        {/* ── 5. 내 루틴 미리보기 ─────────────────────────────────────────── */}
+        {/* ── 5. 내 루틴 (Sprint 2: 샘플 · Sprint 3: GPT + Supabase) ─────── */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>내 루틴</Text>
-
-          {routineData ? (
-            <>
-              {/* AM/PM toggle */}
-              <View style={styles.routineToggle}>
-                <TouchableOpacity
-                  style={[styles.routineToggleBtn, routineTab === 'am' && styles.routineToggleBtnActive]}
-                  onPress={() => setRoutineTab('am')}
-                >
-                  <Ionicons name="sunny-outline" size={14} color={routineTab === 'am' ? '#fff' : Colors.textSecondary} />
-                  <Text style={[styles.routineToggleText, routineTab === 'am' && styles.routineToggleTextActive]}>
-                    AM
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.routineToggleBtn, routineTab === 'pm' && styles.routineToggleBtnActive]}
-                  onPress={() => setRoutineTab('pm')}
-                >
-                  <Ionicons name="moon-outline" size={14} color={routineTab === 'pm' ? '#fff' : Colors.textSecondary} />
-                  <Text style={[styles.routineToggleText, routineTab === 'pm' && styles.routineToggleTextActive]}>
-                    PM
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.routineStatus}>
-                <Ionicons
-                  name={routineData[routineTab] ? 'checkmark-circle' : 'ellipse-outline'}
-                  size={16}
-                  color={routineData[routineTab] ? Colors.success : Colors.textDisabled}
-                />
-                <Text style={styles.routineStatusText}>
-                  {routineData[routineTab] ? `${routineTab.toUpperCase()} 루틴 완료!` : `${routineTab.toUpperCase()} 루틴 미완료`}
-                </Text>
-              </View>
-            </>
-          ) : (
-            <View style={styles.emptyBox}>
-              <Ionicons name="time-outline" size={28} color={Colors.textDisabled} />
-              <Text style={styles.emptyText}>
-                AI 피부 스캔 후 맞춤 루틴이 생성돼요
-              </Text>
-              <TouchableOpacity
-                style={styles.smallScanBtn}
-                onPress={() => navigation.navigate('FaceScanner')}
-              >
-                <Text style={styles.smallScanBtnText}>스캔하러 가기 →</Text>
-              </TouchableOpacity>
+          <View style={styles.routineSectionHeader}>
+            <Text style={styles.sectionTitle}>내 루틴</Text>
+            <View style={styles.samplePill}>
+              <Text style={styles.samplePillText}>샘플</Text>
             </View>
+          </View>
+          <Text style={styles.routineEventLabel}>{HARDCODED_ROUTINE.label}</Text>
+
+          {!lastScan ? (
+            <TouchableOpacity
+              style={styles.routineScanBanner}
+              onPress={() => navigation.navigate('FaceScanner')}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="information-circle-outline" size={18} color={Colors.accent} />
+              <Text style={styles.routineScanBannerText}>
+                피부 스캔을 하면 이 샘플 루틴이 분석 결과·D-day에 맞게 바뀌어요
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={Colors.textSecondary} />
+            </TouchableOpacity>
+          ) : null}
+
+          <View style={styles.routineToggle}>
+            <TouchableOpacity
+              style={[styles.routineToggleBtn, routineTab === 'am' && styles.routineToggleBtnActive]}
+              onPress={() => setRoutineTab('am')}
+            >
+              <Ionicons name="sunny-outline" size={14} color={routineTab === 'am' ? '#fff' : Colors.textSecondary} />
+              <Text style={[styles.routineToggleText, routineTab === 'am' && styles.routineToggleTextActive]}>
+                AM ({HARDCODED_ROUTINE.am_steps.length}단계)
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.routineToggleBtn, routineTab === 'pm' && styles.routineToggleBtnActive]}
+              onPress={() => setRoutineTab('pm')}
+            >
+              <Ionicons name="moon-outline" size={14} color={routineTab === 'pm' ? '#fff' : Colors.textSecondary} />
+              <Text style={[styles.routineToggleText, routineTab === 'pm' && styles.routineToggleTextActive]}>
+                PM ({HARDCODED_ROUTINE.pm_steps.length}단계)
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.routineStatus}>
+            <Ionicons
+              name={routineCheckin[routineTab] ? 'checkmark-circle' : 'ellipse-outline'}
+              size={16}
+              color={routineCheckin[routineTab] ? Colors.success : Colors.textDisabled}
+            />
+            <Text style={styles.routineStatusText}>
+              {routineCheckin[routineTab]
+                ? `오늘 ${routineTab.toUpperCase()} 홈에서 완료했어요`
+                : `홈에서 오늘 ${routineTab.toUpperCase()} 루틴을 체크해 주세요`}
+            </Text>
+          </View>
+
+          {(routineTab === 'am' ? HARDCODED_ROUTINE.am_steps : HARDCODED_ROUTINE.pm_steps).map(
+            (step: RoutineStep) => (
+              <View key={`${routineTab}-${step.step}`} style={styles.routineStepCard}>
+                <View style={styles.routineStepNum}>
+                  <Text style={styles.routineStepNumText}>{step.step}</Text>
+                </View>
+                <View style={styles.routineStepBody}>
+                  <Text style={styles.routineStepCategory}>{step.category}</Text>
+                  <Text style={styles.routineStepDesc}>{step.description}</Text>
+                  <Text style={styles.routineStepIngredient}>추천 성분: {step.keyIngredient}</Text>
+                  <TouchableOpacity
+                    onPress={() => Linking.openURL(oliveYoungSearchUrl(step.searchQuery))}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.oliveyoungLink}>올리브영에서 보기 →</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )
           )}
         </View>
 
@@ -457,6 +488,86 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: Colors.textPrimary,
+  },
+  routineSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  samplePill: {
+    backgroundColor: Colors.accentLight,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: Radius.full,
+  },
+  samplePillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.accent,
+  },
+  routineEventLabel: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  routineScanBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#fff',
+    borderRadius: Radius.md,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: 8,
+  },
+  routineScanBannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: Colors.textPrimary,
+    lineHeight: 17,
+  },
+  routineStepCard: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: Radius.md,
+    padding: 12,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  routineStepNum: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.accentLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  routineStepNumText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.accent,
+  },
+  routineStepBody: {
+    flex: 1,
+    gap: 4,
+  },
+  routineStepCategory: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  routineStepDesc: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+  },
+  routineStepIngredient: {
+    fontSize: 12,
+    color: Colors.textPrimary,
+    fontWeight: '500',
   },
   subTitle: {
     fontSize: 14,
