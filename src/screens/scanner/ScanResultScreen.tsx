@@ -7,8 +7,11 @@ import {
   TouchableOpacity,
   Alert,
   Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../../types';
@@ -53,6 +56,7 @@ export function ScanResultScreen() {
 
   const [saved, setSaved] = useState(initialSaved);
   const [saving, setSaving] = useState(false);
+  const [isGeneratingRoutine, setIsGeneratingRoutine] = useState(false);
 
   const handleSave = async () => {
     if (saved || saving) return;
@@ -70,6 +74,87 @@ export function ScanResultScreen() {
       Alert.alert('저장 실패', e?.message ?? '다시 시도해 주세요.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleGenerateRoutine = async () => {
+    if (isGeneratingRoutine) return;
+    setIsGeneratingRoutine(true);
+    try {
+      const [[, eventType], [, eventDate]] = await AsyncStorage.multiGet([
+        'meve_event_type',
+        'meve_event_date',
+      ]);
+      const daysLeft = eventDate
+        ? Math.max(
+            0,
+            Math.ceil((new Date(eventDate).getTime() - Date.now()) / 86_400_000)
+          )
+        : null;
+
+      const prompt = `You are a Korean skincare expert.
+Skin analysis: ${JSON.stringify(result)}
+Event type: ${eventType || 'general'}, Days until event: ${daysLeft ?? 30}
+
+Create a personalized AM/PM skincare routine in Korean.
+Return ONLY valid JSON, no markdown:
+{
+  "am": [
+    { "step": 1, "category": "폼클렌징", "ingredient": "추천 성분", "tip": "사용 팁" },
+    { "step": 2, "category": "토너", "ingredient": "추천 성분", "tip": "사용 팁" },
+    { "step": 3, "category": "세럼", "ingredient": "추천 성분", "tip": "사용 팁" },
+    { "step": 4, "category": "수분크림", "ingredient": "추천 성분", "tip": "사용 팁" },
+    { "step": 5, "category": "선크림", "ingredient": "추천 성분", "tip": "사용 팁" }
+  ],
+  "pm": [
+    { "step": 1, "category": "오일클렌징", "ingredient": "추천 성분", "tip": "사용 팁" },
+    { "step": 2, "category": "폼클렌징", "ingredient": "추천 성분", "tip": "사용 팁" },
+    { "step": 3, "category": "토너", "ingredient": "추천 성분", "tip": "사용 팁" },
+    { "step": 4, "category": "세럼", "ingredient": "추천 성분", "tip": "사용 팁" },
+    { "step": 5, "category": "수분크림", "ingredient": "추천 성분", "tip": "사용 팁" }
+  ],
+  "generatedAt": "${new Date().toISOString()}",
+  "eventType": "${eventType ?? ''}",
+  "summary": "한 줄 루틴 요약"
+}`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          max_tokens: 1000,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message ?? 'OpenAI 오류');
+
+      const content = data.choices[0].message.content.trim();
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('JSON 파싱 실패');
+      const routine = JSON.parse(jsonMatch[0]);
+
+      await AsyncStorage.setItem('meve_routine', JSON.stringify(routine));
+
+      Alert.alert(
+        '루틴 생성 완료',
+        '루틴이 생성됐어요! SKIN 탭에서 확인해보세요 🩷',
+        [
+          {
+            text: '확인',
+            onPress: () =>
+              navigation.navigate('MainTabs', { screen: 'Skin' } as any),
+          },
+        ]
+      );
+    } catch (e: any) {
+      Alert.alert('루틴 생성 실패', e?.message ?? '다시 시도해 주세요.');
+    } finally {
+      setIsGeneratingRoutine(false);
     }
   };
 
@@ -191,6 +276,24 @@ export function ScanResultScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+
+        {/* AI 루틴 만들기 */}
+        <TouchableOpacity
+          onPress={handleGenerateRoutine}
+          disabled={isGeneratingRoutine}
+          activeOpacity={0.85}
+          style={styles.routineBtn}
+        >
+          {isGeneratingRoutine ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Ionicons name="sparkles-outline" size={20} color="#fff" />
+              <Text style={styles.routineBtnText}>AI 루틴 만들기</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
         <View style={[styles.buttons, styles.buttonsBottom]}>
           <TouchableOpacity
             style={styles.retryBtn}
@@ -377,4 +480,19 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.success,
   },
   saveBtnText: { ...Typography.cta, color: Colors.surface },
+  routineBtn: {
+    backgroundColor: Colors.accent,
+    borderRadius: 16,
+    padding: 18,
+    marginTop: Spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  routineBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16,
+  },
 });

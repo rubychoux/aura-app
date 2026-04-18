@@ -18,7 +18,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Colors, Spacing, Radius } from '../../constants/theme';
 import { supabase } from '../../services/supabase';
 import { AIScanStackParamList, ScanAnalysisResult } from '../../types';
-import { HARDCODED_ROUTINE, oliveYoungSearchUrl, RoutineStep } from '../../constants/routine';
+import { HARDCODED_ROUTINE } from '../../constants/routine';
 import { loadRoutineCheckin, RoutineCheckin } from '../../utils/routineCheckin';
 
 type Nav = NativeStackNavigationProp<AIScanStackParamList, 'SkinHome'>;
@@ -56,6 +56,21 @@ interface IngredientResult {
   eventTip: string;
 }
 
+interface GeneratedRoutineStep {
+  step: number;
+  category: string;
+  ingredient: string;
+  tip: string;
+}
+
+interface GeneratedRoutine {
+  am: GeneratedRoutineStep[];
+  pm: GeneratedRoutineStep[];
+  generatedAt?: string;
+  eventType?: string;
+  summary?: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function SkincareScreen() {
@@ -73,6 +88,7 @@ export function SkincareScreen() {
   // Routine (check-in state for today; steps from HARDCODED_ROUTINE until Sprint 3)
   const [routineCheckin, setRoutineCheckin] = useState<RoutineCheckin>({ am: false, pm: false });
   const [routineTab, setRoutineTab] = useState<'am' | 'pm'>('am');
+  const [generatedRoutine, setGeneratedRoutine] = useState<GeneratedRoutine | null>(null);
 
   const daysLeft = eventDate
     ? Math.ceil((new Date(eventDate).getTime() - Date.now()) / 86_400_000)
@@ -86,11 +102,13 @@ export function SkincareScreen() {
     loadLastScan();
     loadCachedIngredients();
     loadRoutine();
+    loadGeneratedRoutine();
   }, []);
 
   useFocusEffect(
     useCallback(() => {
       loadRoutine();
+      loadGeneratedRoutine();
     }, [])
   );
 
@@ -134,6 +152,14 @@ export function SkincareScreen() {
     const today = new Date().toISOString().slice(0, 10);
     const checkin = await loadRoutineCheckin(today);
     setRoutineCheckin(checkin);
+  };
+
+  const loadGeneratedRoutine = async () => {
+    try {
+      const raw = await AsyncStorage.getItem('meve_routine');
+      if (raw) setGeneratedRoutine(JSON.parse(raw));
+      else setGeneratedRoutine(null);
+    } catch {}
   };
 
   // ── Ingredient analysis ─────────────────────────────────────────────────────
@@ -326,83 +352,124 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
           ) : null}
         </View>
 
-        {/* ── 5. 내 루틴 (Sprint 2: 샘플 · Sprint 3: GPT + Supabase) ─────── */}
+        {/* ── 5. 내 루틴 ──────────────────────────────────────────────────── */}
         <View style={styles.section}>
           <View style={styles.routineSectionHeader}>
             <Text style={styles.sectionTitle}>내 루틴</Text>
-            <View style={styles.samplePill}>
-              <Text style={styles.samplePillText}>샘플</Text>
-            </View>
+            {!generatedRoutine && (
+              <View style={styles.samplePill}>
+                <Text style={styles.samplePillText}>샘플</Text>
+              </View>
+            )}
           </View>
-          <Text style={styles.routineEventLabel}>{HARDCODED_ROUTINE.label}</Text>
-
-          {!lastScan ? (
-            <TouchableOpacity
-              style={styles.routineScanBanner}
-              onPress={() => navigation.navigate('FaceScanner')}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="information-circle-outline" size={18} color={Colors.accent} />
-              <Text style={styles.routineScanBannerText}>
-                피부 스캔을 하면 이 샘플 루틴이 분석 결과·D-day에 맞게 바뀌어요
-              </Text>
-              <Ionicons name="chevron-forward" size={16} color={Colors.textSecondary} />
-            </TouchableOpacity>
+          {generatedRoutine?.summary ? (
+            <Text style={styles.routineEventLabel}>{generatedRoutine.summary}</Text>
+          ) : !generatedRoutine ? (
+            <Text style={styles.routineEventLabel}>{HARDCODED_ROUTINE.label}</Text>
           ) : null}
 
-          <View style={styles.routineToggle}>
-            <TouchableOpacity
-              style={[styles.routineToggleBtn, routineTab === 'am' && styles.routineToggleBtnActive]}
-              onPress={() => setRoutineTab('am')}
-            >
-              <Ionicons name="sunny-outline" size={14} color={routineTab === 'am' ? '#fff' : Colors.textSecondary} />
-              <Text style={[styles.routineToggleText, routineTab === 'am' && styles.routineToggleTextActive]}>
-                AM ({HARDCODED_ROUTINE.am_steps.length}단계)
+          {!generatedRoutine ? (
+            <View style={styles.generatedEmpty}>
+              <Ionicons name="sparkles-outline" size={40} color={Colors.accentMuted} />
+              <Text style={styles.generatedEmptyText}>
+                AI 피부 스캔 후{'\n'}맞춤 루틴이 생성돼요
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.routineToggleBtn, routineTab === 'pm' && styles.routineToggleBtnActive]}
-              onPress={() => setRoutineTab('pm')}
-            >
-              <Ionicons name="moon-outline" size={14} color={routineTab === 'pm' ? '#fff' : Colors.textSecondary} />
-              <Text style={[styles.routineToggleText, routineTab === 'pm' && styles.routineToggleTextActive]}>
-                PM ({HARDCODED_ROUTINE.pm_steps.length}단계)
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.routineStatus}>
-            <Ionicons
-              name={routineCheckin[routineTab] ? 'checkmark-circle' : 'ellipse-outline'}
-              size={16}
-              color={routineCheckin[routineTab] ? Colors.success : Colors.textDisabled}
-            />
-            <Text style={styles.routineStatusText}>
-              {routineCheckin[routineTab]
-                ? `오늘 ${routineTab.toUpperCase()} 홈에서 완료했어요`
-                : `홈에서 오늘 ${routineTab.toUpperCase()} 루틴을 체크해 주세요`}
-            </Text>
-          </View>
-
-          {(routineTab === 'am' ? HARDCODED_ROUTINE.am_steps : HARDCODED_ROUTINE.pm_steps).map(
-            (step: RoutineStep) => (
-              <View key={`${routineTab}-${step.step}`} style={styles.routineStepCard}>
-                <View style={styles.routineStepNum}>
-                  <Text style={styles.routineStepNumText}>{step.step}</Text>
-                </View>
-                <View style={styles.routineStepBody}>
-                  <Text style={styles.routineStepCategory}>{step.category}</Text>
-                  <Text style={styles.routineStepDesc}>{step.description}</Text>
-                  <Text style={styles.routineStepIngredient}>추천 성분: {step.keyIngredient}</Text>
-                  <TouchableOpacity
-                    onPress={() => Linking.openURL(oliveYoungSearchUrl(step.searchQuery))}
-                    activeOpacity={0.7}
+              <TouchableOpacity
+                onPress={() => navigation.navigate('FaceScanner')}
+                style={styles.generatedEmptyBtn}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.generatedEmptyBtnText}>지금 스캔하기</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <View style={styles.generatedToggle}>
+                <TouchableOpacity
+                  onPress={() => setRoutineTab('am')}
+                  style={[
+                    styles.generatedToggleBtn,
+                    routineTab === 'am' && styles.generatedToggleBtnActive,
+                  ]}
+                >
+                  <Ionicons
+                    name="sunny-outline"
+                    size={16}
+                    color={routineTab === 'am' ? Colors.accent : '#999'}
+                  />
+                  <Text
+                    style={[
+                      styles.generatedToggleText,
+                      { color: routineTab === 'am' ? Colors.accent : '#999' },
+                    ]}
                   >
-                    <Text style={styles.oliveyoungLink}>올리브영에서 보기 →</Text>
-                  </TouchableOpacity>
-                </View>
+                    AM 루틴
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setRoutineTab('pm')}
+                  style={[
+                    styles.generatedToggleBtn,
+                    routineTab === 'pm' && styles.generatedToggleBtnActive,
+                  ]}
+                >
+                  <Ionicons
+                    name="moon-outline"
+                    size={16}
+                    color={routineTab === 'pm' ? '#A8D5E8' : '#999'}
+                  />
+                  <Text
+                    style={[
+                      styles.generatedToggleText,
+                      { color: routineTab === 'pm' ? '#A8D5E8' : '#999' },
+                    ]}
+                  >
+                    PM 루틴
+                  </Text>
+                </TouchableOpacity>
               </View>
-            )
+
+              <View style={styles.routineStatus}>
+                <Ionicons
+                  name={routineCheckin[routineTab] ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={16}
+                  color={routineCheckin[routineTab] ? Colors.success : Colors.textDisabled}
+                />
+                <Text style={styles.routineStatusText}>
+                  {routineCheckin[routineTab]
+                    ? `오늘 ${routineTab.toUpperCase()} 홈에서 완료했어요`
+                    : `홈에서 오늘 ${routineTab.toUpperCase()} 루틴을 체크해 주세요`}
+                </Text>
+              </View>
+
+              {(routineTab === 'am' ? generatedRoutine.am : generatedRoutine.pm).map((step) => {
+                const accent = routineTab === 'am' ? Colors.accent : '#A8D5E8';
+                return (
+                  <View
+                    key={`${routineTab}-${step.step}`}
+                    style={[styles.generatedStepCard, { borderLeftColor: accent }]}
+                  >
+                    <View style={styles.generatedStepHeader}>
+                      <View style={[styles.generatedStepNum, { backgroundColor: accent }]}>
+                        <Text style={styles.generatedStepNumText}>{step.step}</Text>
+                      </View>
+                      <Text style={styles.generatedStepCategory}>{step.category}</Text>
+                    </View>
+                    <Text style={styles.generatedStepIngredient}>추천: {step.ingredient}</Text>
+                    <Text style={styles.generatedStepTip}>{step.tip}</Text>
+                    <TouchableOpacity
+                      onPress={() =>
+                        Linking.openURL(
+                          `https://www.oliveyoung.co.kr/store/search/getSearchMain.do?query=${encodeURIComponent(step.category)}`
+                        )
+                      }
+                    >
+                      <Text style={styles.generatedStepOliveLink}>올리브영에서 보기 →</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </>
           )}
         </View>
 
@@ -722,6 +789,101 @@ const styles = StyleSheet.create({
   smallScanBtnText: {
     fontSize: 13,
     color: Colors.accent,
+    fontWeight: '600',
+  },
+
+  // Generated routine
+  generatedToggle: {
+    flexDirection: 'row',
+    backgroundColor: '#F0E6EC',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 4,
+  },
+  generatedToggleBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 4,
+    backgroundColor: 'transparent',
+  },
+  generatedToggleBtnActive: {
+    backgroundColor: '#fff',
+  },
+  generatedToggleText: {
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  generatedStepCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+    borderLeftWidth: 4,
+  },
+  generatedStepHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  generatedStepNum: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  generatedStepNumText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  generatedStepCategory: {
+    fontWeight: '700',
+    fontSize: 15,
+    color: '#2D2D2D',
+  },
+  generatedStepIngredient: {
+    fontSize: 13,
+    color: Colors.accent,
+    marginBottom: 4,
+  },
+  generatedStepTip: {
+    fontSize: 12,
+    color: '#999',
+  },
+  generatedStepOliveLink: {
+    fontSize: 12,
+    color: Colors.accent,
+    marginTop: 6,
+  },
+  generatedEmpty: {
+    alignItems: 'center',
+    padding: 32,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  generatedEmptyText: {
+    fontSize: 15,
+    color: '#999',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  generatedEmptyBtn: {
+    backgroundColor: Colors.accent,
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    marginTop: 16,
+  },
+  generatedEmptyBtnText: {
+    color: '#fff',
     fontWeight: '600',
   },
 });

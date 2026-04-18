@@ -162,7 +162,125 @@ export type MainStackParamList = {
   MainTabs: undefined;
   ScanResult: { result: ScanAnalysisResult; isSaved?: boolean };
   EventFlow: undefined;
+  ProfileEdit: undefined;
+  NotificationSettings: undefined;
+  PrivacyPolicy: undefined;
+  TermsOfService: undefined;
+  FaceAnalysis: undefined;
+  FaceAnalysisResult: { result: FaceAnalysisResult };
+  TodaysLook: undefined;
+  LookDetail: { look: LookRecommendation };
+  InspoLook: undefined;
+  InspoLookResult: { result: InspoLookResult; imageUri?: string; keyword?: string };
+  GlamSyncList: undefined;
+  GlamSyncCreate: undefined;
+  GlamSyncDetail: { syncId: string };
+  LookPollList: undefined;
+  LookPollCreate: undefined;
+  LookPollDetail: { pollId: string };
 };
+
+export interface GlamSync {
+  id: string;
+  host_id: string;
+  event_name: string;
+  event_date: string | null;
+  final_glam_level: number | null;
+  invite_code: string;
+  created_at: string;
+}
+
+export interface GlamSyncMember {
+  id: string;
+  sync_id: string;
+  user_id: string;
+  proposed_level: number | null;
+  checkin_photo_url: string | null;
+  joined_at: string;
+}
+
+export interface LookPoll {
+  id: string;
+  user_id: string;
+  question: string;
+  photo_urls: string[];
+  is_public: boolean;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface LookPollVote {
+  id: string;
+  poll_id: string;
+  voter_id: string;
+  selected_index: number;
+  comment: string | null;
+  voted_at: string;
+}
+
+export interface InspoReferenceAnalysis {
+  baseFinish: string;
+  eyeStyle: string;
+  lipColor: string;
+  lipTexture: string;
+  blushPosition: string;
+  blushColor: string;
+  overallVibe: string;
+  keyPoints: string[];
+}
+
+export interface InspoStep {
+  step: number;
+  category: string;
+  instruction: string;
+  productHint: string;
+}
+
+export interface InspoPersonalizedGuide {
+  adjustments: string;
+  steps: InspoStep[];
+  colorAdjustment: string;
+}
+
+export interface InspoLookResult {
+  referenceAnalysis: InspoReferenceAnalysis;
+  personalizedGuide: InspoPersonalizedGuide;
+  summary: string;
+}
+
+export interface FaceAnalysisResult {
+  faceShape: string;
+  personalColor: string;
+  undertone: string;
+  eyeShape: string;
+  eyeTail: string;
+  lipFullness: string;
+  skinTone: string;
+  makeupRecommendation: {
+    foundation: string;
+    lip: string;
+    eye: string;
+    blush: string;
+  };
+  colorPalette: string[];
+  avoidColors: string[];
+  summary: string;
+}
+
+export interface LookProduct {
+  category: string;
+  name: string;
+  tip: string;
+}
+
+export interface LookRecommendation {
+  lookName: string;
+  description: string;
+  keyPoints: string[];
+  products: LookProduct[];
+  colorKeyword: string;
+  difficulty: '쉬움' | '보통' | '어려움';
+}
 
 export type EventStackParamList = {
   EventSelect: undefined;

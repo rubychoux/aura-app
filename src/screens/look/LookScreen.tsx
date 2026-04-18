@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,13 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
+import { MainStackParamList } from '../../types';
+
+type Nav = NativeStackNavigationProp<MainStackParamList>;
 
 type AestheticKey = 'pure' | 'glow' | 'bold' | 'natural' | 'vintage';
 
@@ -60,9 +66,36 @@ const AESTHETICS: Aesthetic[] = [
 ];
 
 export function LookScreen() {
+  const navigation = useNavigation<Nav>();
   const [selected, setSelected] = useState<AestheticKey | null>(null);
 
   const selectedAesthetic = AESTHETICS.find((a) => a.key === selected);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const storedLabel = await AsyncStorage.getItem('meve_vibe');
+        if (storedLabel) {
+          const match = AESTHETICS.find((a) => a.label === storedLabel);
+          if (match) setSelected(match.key);
+        }
+      } catch {}
+    })();
+  }, []);
+
+  const handleSelect = async (key: AestheticKey) => {
+    const isDeselect = selected === key;
+    const next = isDeselect ? null : key;
+    setSelected(next);
+    try {
+      if (next) {
+        const label = AESTHETICS.find((a) => a.key === next)?.label;
+        if (label) await AsyncStorage.setItem('meve_vibe', label);
+      } else {
+        await AsyncStorage.removeItem('meve_vibe');
+      }
+    } catch {}
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -96,7 +129,7 @@ export function LookScreen() {
               <TouchableOpacity
                 key={item.key}
                 style={[styles.aestheticCard, isSelected && styles.aestheticCardSelected]}
-                onPress={() => setSelected(isSelected ? null : item.key)}
+                onPress={() => handleSelect(item.key)}
                 activeOpacity={0.8}
               >
                 <Ionicons
@@ -124,11 +157,15 @@ export function LookScreen() {
           </View>
         )}
 
-        {/* 커밍순 카드들 */}
+        {/* 기능 카드들 */}
         <View style={styles.comingSoonSection}>
-          <Text style={styles.sectionLabel}>준비 중인 기능</Text>
+          <Text style={styles.sectionLabel}>AI 뷰티 기능</Text>
 
-          <View style={styles.comingSoonCard}>
+          <TouchableOpacity
+            style={styles.comingSoonCard}
+            onPress={() => navigation.navigate('FaceAnalysis')}
+            activeOpacity={0.85}
+          >
             <View style={styles.comingSoonIconWrap}>
               <Ionicons name="scan-outline" size={28} color={Colors.accent} />
             </View>
@@ -137,14 +174,15 @@ export function LookScreen() {
               <Text style={styles.comingSoonDesc}>
                 얼굴형과 피부톤을 분석해 어울리는 룩을 추천해드려요
               </Text>
-              <View style={styles.comingSoonBadge}>
-                <Ionicons name="sparkles-outline" size={12} color={Colors.accent} />
-                <Text style={styles.comingSoonBadgeText}> 곧 출시될 예정이에요</Text>
-              </View>
             </View>
-          </View>
+            <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
+          </TouchableOpacity>
 
-          <View style={styles.comingSoonCard}>
+          <TouchableOpacity
+            style={styles.comingSoonCard}
+            onPress={() => navigation.navigate('TodaysLook')}
+            activeOpacity={0.85}
+          >
             <View style={styles.comingSoonIconWrap}>
               <Ionicons name="calendar-outline" size={28} color={Colors.accent} />
             </View>
@@ -153,12 +191,23 @@ export function LookScreen() {
               <Text style={styles.comingSoonDesc}>
                 D-day에 맞는 메이크업을 제안해드려요
               </Text>
-              <View style={styles.comingSoonBadge}>
-                <Ionicons name="sparkles-outline" size={12} color={Colors.accent} />
-                <Text style={styles.comingSoonBadgeText}> 곧 출시될 예정이에요</Text>
-              </View>
             </View>
-          </View>
+            <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* 인스포 룩 분석 */}
+        <View style={styles.inspoSection}>
+          <Text style={styles.inspoTitle}>인스포 룩 분석 ✨</Text>
+          <Text style={styles.inspoDesc}>레퍼런스 사진으로 나만의 메이크업 찾기</Text>
+          <TouchableOpacity
+            style={styles.inspoBtn}
+            onPress={() => navigation.navigate('InspoLook')}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="image-outline" size={18} color="#fff" />
+            <Text style={styles.inspoBtnText}>사진 업로드하기</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -269,4 +318,29 @@ const styles = StyleSheet.create({
   comingSoonDesc: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18 },
   comingSoonBadge: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
   comingSoonBadgeText: { fontSize: 12, color: Colors.accent, fontWeight: '500' },
+
+  // Inspo section
+  inspoSection: {
+    marginTop: Spacing.lg,
+    marginHorizontal: Spacing.xl,
+    padding: Spacing.md,
+    backgroundColor: '#FFF5F9',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: '#FFC4D6',
+    gap: 6,
+  },
+  inspoTitle: { fontSize: 15, fontWeight: '800', color: '#2D2D2D' },
+  inspoDesc: { fontSize: 13, color: '#9A8F97' },
+  inspoBtn: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#FF6B9D',
+    borderRadius: 12,
+    paddingVertical: 12,
+  },
+  inspoBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

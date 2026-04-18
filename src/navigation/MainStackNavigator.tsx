@@ -4,6 +4,22 @@ import { MainStackParamList } from '../types';
 import { MainNavigator } from './MainNavigator';
 import { EventStackNavigator } from './EventStackNavigator';
 import { ScanResultScreen } from '../screens/scanner/ScanResultScreen';
+import { ProfileEditScreen } from '../screens/profile/ProfileEditScreen';
+import { NotificationSettingsScreen } from '../screens/profile/NotificationSettingsScreen';
+import { PrivacyPolicyScreen } from '../screens/profile/PrivacyPolicyScreen';
+import { TermsOfServiceScreen } from '../screens/profile/TermsOfServiceScreen';
+import { FaceAnalysisScreen } from '../screens/look/FaceAnalysisScreen';
+import { FaceAnalysisResultScreen } from '../screens/look/FaceAnalysisResultScreen';
+import { TodaysLookScreen } from '../screens/look/TodaysLookScreen';
+import { LookDetailScreen } from '../screens/look/LookDetailScreen';
+import { InspoLookScreen } from '../screens/look/InspoLookScreen';
+import { InspoLookResultScreen } from '../screens/look/InspoLookResultScreen';
+import { GlamSyncListScreen } from '../screens/community/GlamSyncListScreen';
+import { GlamSyncCreateScreen } from '../screens/community/GlamSyncCreateScreen';
+import { GlamSyncDetailScreen } from '../screens/community/GlamSyncDetailScreen';
+import { LookPollListScreen } from '../screens/community/LookPollListScreen';
+import { LookPollCreateScreen } from '../screens/community/LookPollCreateScreen';
+import { LookPollDetailScreen } from '../screens/community/LookPollDetailScreen';
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
@@ -17,6 +33,22 @@ export function MainStackNavigator() {
         component={EventStackNavigator}
         options={{ presentation: 'modal' }}
       />
+      <Stack.Screen name="ProfileEdit" component={ProfileEditScreen} />
+      <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
+      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+      <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
+      <Stack.Screen name="FaceAnalysis" component={FaceAnalysisScreen} />
+      <Stack.Screen name="FaceAnalysisResult" component={FaceAnalysisResultScreen} />
+      <Stack.Screen name="TodaysLook" component={TodaysLookScreen} />
+      <Stack.Screen name="LookDetail" component={LookDetailScreen} />
+      <Stack.Screen name="InspoLook" component={InspoLookScreen} />
+      <Stack.Screen name="InspoLookResult" component={InspoLookResultScreen} />
+      <Stack.Screen name="GlamSyncList" component={GlamSyncListScreen} />
+      <Stack.Screen name="GlamSyncCreate" component={GlamSyncCreateScreen} />
+      <Stack.Screen name="GlamSyncDetail" component={GlamSyncDetailScreen} />
+      <Stack.Screen name="LookPollList" component={LookPollListScreen} />
+      <Stack.Screen name="LookPollCreate" component={LookPollCreateScreen} />
+      <Stack.Screen name="LookPollDetail" component={LookPollDetailScreen} />
     </Stack.Navigator>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -7,13 +7,23 @@ import {
   StatusBar,
   TouchableOpacity,
   useWindowDimensions,
+  LayoutAnimation,
+  Platform,
+  UIManager,
 } from 'react-native';
+
+if (
+  Platform.OS === 'android' &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+const CALENDAR_EXPANDED_KEY = 'meve_calendar_expanded';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
-import { HARDCODED_ROUTINE, summarizeRoutineSteps } from '../../constants/routine';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
   loadRoutineCheckin,
   loadRoutineCheckinsForDates,
@@ -64,12 +74,6 @@ function getFirstDayOfMonth(year: number, month: number) {
   return new Date(year, month, 1).getDay(); // 0 = Sunday
 }
 
-function formatEventDate(isoStr: string): string {
-  if (!isoStr) return '';
-  const d = new Date(isoStr);
-  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
-}
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ScanRecord {
@@ -81,6 +85,35 @@ interface Routine {
   am: boolean;
   pm: boolean;
 }
+
+type PersonalColor = '쿨톤 여름' | '쿨톤 겨울' | '웜톤 봄' | '웜톤 가을';
+
+const PERSONAL_COLOR_SWATCHES: Record<PersonalColor, string[]> = {
+  '쿨톤 여름': ['#F4B8C8', '#C8A8D4', '#A8C4D4', '#D4A8B8'],
+  '쿨톤 겨울': ['#C41E3A', '#4B0082', '#000080', '#2F4F4F'],
+  '웜톤 봄':   ['#FFB347', '#FF8C69', '#FFD700', '#98FB98'],
+  '웜톤 가을': ['#8B4513', '#CD853F', '#D2691E', '#A0522D'],
+};
+
+const SKIN_TIPS = [
+  '자외선 차단제는 흐린 날에도 꼭 발라주세요',
+  '세안 후 3분 이내에 수분크림을 발라야 효과적이에요',
+  '주 1회 각질 케어로 피부톤을 맑게 유지해요',
+  '잠들기 전 수분팩으로 피부 장벽을 지켜주세요',
+  '비타민 C는 아침 루틴에 추가하면 칙칙함을 줄여줘요',
+  '미지근한 물로 세안해야 유수분 밸런스가 유지돼요',
+  '베개 커버는 주 2회 세탁해 트러블을 예방해요',
+];
+
+const LOOK_TIPS = [
+  '쿨톤이면 핑크 계열 블러셔가 더 자연스러워요 💕',
+  '웨딩 D-30, 새 제품은 최소 2주 전에 테스트해보세요',
+  '무쌍 눈엔 밝은 펄 섀도로 눈두덩에 포인트를 줘보세요',
+  '하트형 얼굴엔 광대 아래 사선 블러셔가 잘 어울려요',
+  '립은 D-day 2주 전부터 입술 각질 케어를 시작하세요',
+  '파운데이션은 목선 경계가 안 생기는 톤으로 고르세요',
+  '추구미를 정하면 메이크업이 훨씬 빠르고 통일감 있어요',
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -94,6 +127,9 @@ export function HomeScreen() {
   const [streak, setStreak] = useState<number>(0);
   const [routine, setRoutine] = useState<Routine>({ am: false, pm: false });
   const [routineByDate, setRoutineByDate] = useState<Record<string, RoutineCheckin>>({});
+  const [vibe, setVibe] = useState<string | null>(null);
+  const [personalColor, setPersonalColor] = useState<string | null>(null);
+  const [calendarExpanded, setCalendarExpanded] = useState(false);
 
   // Calendar state
   const now = new Date();
@@ -107,6 +143,8 @@ export function HomeScreen() {
     loadScans();
     loadRoutine();
     loadEventFromStorage();
+    loadLookPrefs();
+    loadCalendarExpanded();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
@@ -115,6 +153,14 @@ export function HomeScreen() {
     );
     return () => subscription.unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-fetch display name whenever the Home tab regains focus — so profile
+  // edits propagate back without needing to re-login.
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile();
+    }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   const daysInMonthForEffect = getDaysInMonth(calYear, calMonth);
   useEffect(() => {
@@ -144,7 +190,14 @@ export function HomeScreen() {
       .select('display_name')
       .eq('id', userId)
       .single();
-    if (data?.display_name) setDisplayName(data.display_name);
+    if (data?.display_name) {
+      setDisplayName(data.display_name);
+      return;
+    }
+    try {
+      const cached = await AsyncStorage.getItem('meve_display_name');
+      if (cached) setDisplayName(cached);
+    } catch {}
   };
 
   const loadScans = async () => {
@@ -173,6 +226,36 @@ export function HomeScreen() {
     setRoutine(checkin);
   };
 
+  const loadLookPrefs = async () => {
+    try {
+      const [[, v], [, pc]] = await AsyncStorage.multiGet([
+        'meve_vibe',
+        'meve_personal_color',
+      ]);
+      setVibe(v);
+      setPersonalColor(pc);
+    } catch {}
+  };
+
+  const loadCalendarExpanded = async () => {
+    try {
+      const val = await AsyncStorage.getItem(CALENDAR_EXPANDED_KEY);
+      if (val === 'true') setCalendarExpanded(true);
+    } catch {}
+  };
+
+  const toggleCalendar = async () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    const next = !calendarExpanded;
+    setCalendarExpanded(next);
+    try {
+      await AsyncStorage.setItem(
+        CALENDAR_EXPANDED_KEY,
+        next ? 'true' : 'false'
+      );
+    } catch {}
+  };
+
   const loadEventFromStorage = async () => {
     if (eventType) return;
     try {
@@ -190,13 +273,16 @@ export function HomeScreen() {
     setRoutine(next);
     const today = new Date().toISOString().slice(0, 10);
     try {
-      await AsyncStorage.setItem(routineCheckinStorageKey(today), JSON.stringify(next));
+      await AsyncStorage.multiSet([
+        [routineCheckinStorageKey(today), JSON.stringify(next)],
+        ['meve_am_done', next.am ? '1' : '0'],
+        ['meve_pm_done', next.pm ? '1' : '0'],
+      ]);
       setRoutineByDate((prev) => ({ ...prev, [today]: next }));
     } catch {}
   };
 
   // ── Derived ─────────────────────────────────────────────────────────────────
-  const greeting = displayName ? `${displayName}님 안녕하세요 :)` : '안녕하세요 :)';
   const eventConfig = eventType ? EVENT_CONFIG[eventType as EventKey] : null;
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -218,8 +304,27 @@ export function HomeScreen() {
   const todayStr = now.toISOString().slice(0, 10);
   const eventDateStr = eventDate ? eventDate.slice(0, 10) : null;
 
-  const amStepSummary = summarizeRoutineSteps(HARDCODED_ROUTINE.am_steps);
-  const pmStepSummary = summarizeRoutineSteps(HARDCODED_ROUTINE.pm_steps);
+  const domToday = new Date().getDate();
+  const tipIndex = domToday % 7;
+  const tipLabel = domToday % 2 === 0 ? 'SKIN' : 'LOOK';
+  const tipText = domToday % 2 === 0 ? SKIN_TIPS[tipIndex] : LOOK_TIPS[tipIndex];
+  const latestScan = scanRecords[0] ?? null;
+  const pcSwatches =
+    personalColor && (personalColor as PersonalColor) in PERSONAL_COLOR_SWATCHES
+      ? PERSONAL_COLOR_SWATCHES[personalColor as PersonalColor]
+      : null;
+
+  const goToFaceScanner = () => {
+    (navigation as any).navigate('Skin', { screen: 'FaceScanner' });
+  };
+
+  const currentMonthPrefix = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  })();
+  const monthScanCount = scanRecords.filter((r) =>
+    r.date.startsWith(currentMonthPrefix)
+  ).length;
 
   // Selected day scan info
   const selectedDateStr = selectedDay
@@ -257,76 +362,83 @@ export function HomeScreen() {
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FDF6F9" />
+      <StatusBar barStyle="dark-content" backgroundColor="#FAFBFC" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── HEADER ─────────────────────────────────────────────────────── */}
-        <View style={styles.header}>
-          <Text style={styles.wordmark}>meve</Text>
-          <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="settings-outline" size={22} color="#999" />
+        {/* ── COMPACT HEADER ───────────────────────────────────────────── */}
+        <View style={styles.compactHeader}>
+          <View style={styles.compactHeaderMain}>
+            <Text style={styles.compactSubtitle}>오늘도 빛나는 하루예요 ✨</Text>
+            <Text style={styles.compactName}>
+              {displayName ?? '회원'}님
+            </Text>
+
+            <View style={styles.ddayPillRow}>
+              {eventConfig && ddayCount != null ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.ddayPillSet}
+                    onPress={() => navigation.navigate('EventFlow')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.ddayPillTextSet}>
+                      {eventType === 'wedding' ? '💍' :
+                       eventType === 'date' ? '💕' :
+                       eventType === 'graduation' ? '🎓' :
+                       eventType === 'travel' ? '✈️' : '✨'}{' '}
+                      {eventConfig.label}까지 D-{ddayCount}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => navigation.navigate('EventFlow')}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  >
+                    <Text style={styles.ddayChangeLink}>변경</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={styles.ddayPillUnset}
+                  onPress={() => navigation.navigate('EventFlow')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.ddayPillTextUnset}>이벤트를 설정해요 →</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={styles.settingsBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="settings-outline" size={22} color="#8A8A9A" />
           </TouchableOpacity>
         </View>
 
-        {/* ── GREETING ───────────────────────────────────────────────────── */}
-        <Text style={styles.greeting}>{greeting}</Text>
-
-        {/* ── D-DAY HERO CARD ────────────────────────────────────────────── */}
-        {eventConfig && ddayCount != null ? (
-          <LinearGradient
-            colors={['#FFD6E7', '#C9B8FF']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.ddayCard}
-          >
-            <View style={styles.ddayTopRow}>
-              <Ionicons
-                name={eventType === 'wedding' ? 'diamond-outline' :
-                      eventType === 'date' ? 'heart-outline' :
-                      eventType === 'graduation' ? 'school-outline' :
-                      eventType === 'travel' ? 'airplane-outline' : 'sparkles-outline'}
-                size={20}
-                color="#fff"
-              />
-              <Text style={styles.ddayDateText}>{formatEventDate(eventDate!)}</Text>
-              <Ionicons name="sparkles" size={14} color="#fff" style={styles.ddaySparkles} />
-            </View>
-            <Text style={styles.ddayCount}>{eventConfig.label}까지 D-{ddayCount}</Text>
-            <Text style={styles.ddaySub}>특별한 날을 위해 준비해요</Text>
-            <TouchableOpacity
-              style={styles.ddayChangeBtn}
-              onPress={() => navigation.navigate('EventFlow')}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.ddayChangeBtnText}>변경하기</Text>
-            </TouchableOpacity>
-          </LinearGradient>
-        ) : (
-          <LinearGradient
-            colors={['#FFD6E7', '#C9B8FF']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.ddayCard}
-          >
-            <Ionicons name="calendar-outline" size={28} color="rgba(255,255,255,0.9)" style={{ marginBottom: 10 }} />
-            <Text style={[styles.ddayCount, { fontSize: 20 }]}>특별한 날을 준비하고 있나요?</Text>
-            <Text style={styles.ddaySub}>이벤트를 설정하면 D-day를 함께 준비해드려요</Text>
-            <TouchableOpacity
-              style={styles.ddaySetBtn}
-              onPress={() => navigation.navigate('EventFlow')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.ddaySetBtnText}>이벤트를 설정해봐요 →</Text>
-            </TouchableOpacity>
-          </LinearGradient>
-        )}
-
-        {/* ── CALENDAR ───────────────────────────────────────────────────── */}
-        <Text style={styles.sectionTitle}>피부 기록</Text>
+        {/* ── CALENDAR (collapsible) ──────────────────────────────────── */}
         <View style={styles.calendarCard}>
+          <TouchableOpacity
+            style={styles.calFoldHeader}
+            onPress={toggleCalendar}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.calFoldTitle}>피부 기록 🗓️</Text>
+            <View style={styles.calFoldPill}>
+              <Text style={styles.calFoldPillText}>이번 달 {monthScanCount}회 스캔</Text>
+            </View>
+            <Ionicons
+              name={calendarExpanded ? 'chevron-up-outline' : 'chevron-down-outline'}
+              size={18}
+              color="#999"
+            />
+          </TouchableOpacity>
+
+          {calendarExpanded && (
+          <View style={styles.calContent}>
           {/* Month nav */}
           <View style={styles.calMonthRow}>
             <TouchableOpacity onPress={prevMonth} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -442,106 +554,224 @@ export function HomeScreen() {
               )}
             </View>
           )}
-        </View>
-
-        {/* ── AM/PM ROUTINE ──────────────────────────────────────────────── */}
-        <Text style={styles.sectionTitle}>오늘 루틴 체크</Text>
-        <View style={styles.routineRow}>
-          {/* AM */}
-          <TouchableOpacity
-            style={[styles.routineCard, routine.am && styles.routineCardAmDone]}
-            onPress={() => toggleRoutine('am')}
-            activeOpacity={0.8}
-          >
-            <View style={styles.routineCardTop}>
-              <Ionicons name="sunny-outline" size={24} color={routine.am ? '#F2A7C3' : '#ccc'} />
-              <Text style={styles.routineLabel}>AM 루틴</Text>
-              <View style={[
-                styles.routineCheckCircle,
-                routine.am && { backgroundColor: '#F2A7C3', borderWidth: 0 },
-              ]}>
-                {routine.am && <Ionicons name="checkmark" size={13} color="#fff" />}
-              </View>
-            </View>
-            {routine.am ? (
-              <Text style={styles.routineSummary} numberOfLines={4}>
-                {amStepSummary}
-              </Text>
-            ) : (
-              <Text style={styles.routineHint} numberOfLines={2}>
-                완료 시 순서가 표시돼요
-              </Text>
-            )}
-          </TouchableOpacity>
-
-          {/* PM */}
-          <TouchableOpacity
-            style={[styles.routineCard, routine.pm && styles.routineCardPmDone]}
-            onPress={() => toggleRoutine('pm')}
-            activeOpacity={0.8}
-          >
-            <View style={styles.routineCardTop}>
-              <Ionicons name="moon-outline" size={24} color={routine.pm ? '#A8D5E8' : '#ccc'} />
-              <Text style={styles.routineLabel}>PM 루틴</Text>
-              <View style={[
-                styles.routineCheckCircle,
-                routine.pm && { backgroundColor: '#A8D5E8', borderWidth: 0 },
-              ]}>
-                {routine.pm && <Ionicons name="checkmark" size={13} color="#fff" />}
-              </View>
-            </View>
-            {routine.pm ? (
-              <Text style={styles.routineSummary} numberOfLines={4}>
-                {pmStepSummary}
-              </Text>
-            ) : (
-              <Text style={styles.routineHint} numberOfLines={2}>
-                완료 시 순서가 표시돼요
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        {/* ── STREAK BANNER ──────────────────────────────────────────────── */}
-        {streak > 0 && (
-          <LinearGradient
-            colors={['#FFE4A0', '#FFD57E']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.streakBanner}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Ionicons name="flame" size={18} color="#B8860B" />
-              <Text style={styles.streakTitle}>{streak}일 연속 스캔 중!</Text>
-            </View>
-            <Text style={styles.streakSub}>꾸준히 기록하고 있어요</Text>
-          </LinearGradient>
-        )}
-
-        {/* ── SCAN HERO CARD ─────────────────────────────────────────────── */}
-        <TouchableOpacity
-          style={styles.scanHero}
-          activeOpacity={0.85}
-          onPress={() => navigation.navigate('Skin')}
-        >
-          <Ionicons name="scan-outline" size={28} color="#fff" />
-          <View style={styles.scanHeroText}>
-            <Text style={styles.scanHeroTitle}>지금 피부 진단하기</Text>
-            <Text style={styles.scanHeroDesc}>AI가 내 피부 상태를 분석해드려요</Text>
           </View>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
-        </TouchableOpacity>
+          )}
+        </View>
 
-        <View style={{ height: 40 }} />
+        {/* ── SECTION 2: SKIN + LOOK TODAY ────────────────────────────── */}
+        <Text style={styles.sectionTitle}>오늘의 체크인</Text>
+        <View style={styles.dualRow}>
+          {/* SKIN */}
+          <View style={[styles.dualCard, styles.skinCard]}>
+            <View style={styles.dualCardHeader}>
+              <Ionicons name="body-outline" size={22} color="#5BA3D9" />
+              <Text style={[styles.dualCardTitle, { color: '#5BA3D9' }]}>SKIN</Text>
+            </View>
+            <View style={styles.dualCheckRow}>
+              <TouchableOpacity
+                style={styles.dualCheckItem}
+                onPress={() => toggleRoutine('am')}
+                activeOpacity={0.75}
+              >
+                <View style={[styles.dualCheckCircle, routine.am && styles.dualCheckCircleDone]}>
+                  {routine.am && <Ionicons name="checkmark" size={13} color="#fff" />}
+                </View>
+                <Text style={styles.dualCheckLabel}>AM</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.dualCheckItem}
+                onPress={() => toggleRoutine('pm')}
+                activeOpacity={0.75}
+              >
+                <View style={[styles.dualCheckCircle, routine.pm && styles.dualCheckCircleDone]}>
+                  {routine.pm && <Ionicons name="checkmark" size={13} color="#fff" />}
+                </View>
+                <Text style={styles.dualCheckLabel}>PM</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={[styles.dualCta, { backgroundColor: '#5BA3D9' }]}
+              onPress={goToFaceScanner}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.dualCtaText}>피부 스캔하기</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* LOOK */}
+          <View style={[styles.dualCard, styles.lookCard]}>
+            <View style={styles.dualCardHeader}>
+              <Ionicons name="color-palette-outline" size={22} color="#FF6B9D" />
+              <Text style={[styles.dualCardTitle, { color: '#FF6B9D' }]}>LOOK</Text>
+            </View>
+            <View style={styles.dualBodyBox}>
+              <Text style={styles.lookVibeText} numberOfLines={2}>
+                {vibe ? `${vibe} 추구미` : '추구미를 선택해요'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.dualCta, { backgroundColor: '#FF6B9D' }]}
+              onPress={() => navigation.navigate('Look')}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.dualCtaText}>룩 찾기</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── SECTION 3: RECENT ACTIVITY HORIZONTAL SCROLL ────────────── */}
+        <Text style={styles.sectionTitle}>최근 활동</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.hScrollContent}
+        >
+          {/* Card 1 — 최근 스캔 결과 */}
+          <View style={[styles.hCard, { borderLeftColor: '#5BA3D9' }]}>
+            <Text style={styles.hCardTitle}>최근 스캔 결과 📸</Text>
+            {latestScan ? (
+              <>
+                <Text style={[styles.hCardScore, styles.hCardScoreLatest]}>
+                  {latestScan.score}점
+                </Text>
+                <Text style={styles.hCardSub}>{latestScan.date}</Text>
+              </>
+            ) : (
+              <Text style={styles.hCardBody}>아직 스캔 기록이 없어요</Text>
+            )}
+            <TouchableOpacity onPress={goToFaceScanner}>
+              <Text style={[styles.hCardCta, { color: '#5BA3D9' }]}>
+                {latestScan ? '다시 스캔하기 →' : '스캔하러 가기 →'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Card 2 — 오늘의 룩 미리보기 */}
+          <View style={[styles.hCard, { borderLeftColor: '#FF6B9D' }]}>
+            <Text style={styles.hCardTitle}>오늘의 룩 💄</Text>
+            <Text style={styles.hCardBody}>
+              {vibe
+                ? `${vibe} 추구미에 맞는 룩을 찾아볼까요?`
+                : '추구미를 선택하면 오늘의 룩을 추천해드려요'}
+            </Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Look')}>
+              <Text style={[styles.hCardCta, { color: '#FF6B9D' }]}>LOOK에서 더 보기 →</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Card 3 — 스킨 스코어 그래프 */}
+          <View style={[styles.hCard, { borderLeftColor: '#5BA3D9' }]}>
+            <Text style={styles.hCardTitle}>스킨 스코어 📈</Text>
+            {scanRecords.length > 0 ? (
+              <View style={styles.miniBarRow}>
+                {scanRecords.slice(0, 7).reverse().map((r, i) => (
+                  <View
+                    key={`${r.date}-${i}`}
+                    style={[
+                      styles.miniBar,
+                      {
+                        height: Math.max(6, (r.score / 100) * 48),
+                        backgroundColor: scoreColor(r.score),
+                      },
+                    ]}
+                  />
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.hCardBody}>스캔을 시작하면 점수가 기록돼요</Text>
+            )}
+            <TouchableOpacity onPress={goToFaceScanner}>
+              <Text style={[styles.hCardCta, { color: '#5BA3D9' }]}>자세히 보기 →</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Card 4 — 퍼스널 컬러 */}
+          <View style={[styles.hCard, { borderLeftColor: '#FF6B9D' }]}>
+            <Text style={styles.hCardTitle}>퍼스널 컬러 ✨</Text>
+            {personalColor ? (
+              <>
+                <Text style={styles.hCardScore}>{personalColor}</Text>
+                {pcSwatches && (
+                  <View style={styles.swatchRow}>
+                    {pcSwatches.map((hex) => (
+                      <View
+                        key={hex}
+                        style={[styles.swatchDot, { backgroundColor: hex }]}
+                      />
+                    ))}
+                  </View>
+                )}
+              </>
+            ) : (
+              <Text style={styles.hCardBody}>
+                AI 얼굴 분석으로 퍼스널 컬러를 알아보세요
+              </Text>
+            )}
+            <TouchableOpacity onPress={() => navigation.navigate('Look')}>
+              <Text style={[styles.hCardCta, { color: '#FF6B9D' }]}>
+                {personalColor ? '다시 분석하기 →' : '얼굴 분석하기 →'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Card 5 — Scan Streak */}
+          <View style={[styles.hCard, { borderLeftColor: '#FFB347' }]}>
+            <Text style={styles.hCardTitle}>스캔 기록 🔥</Text>
+            <Text style={[styles.hCardScore, { color: '#B8860B' }]}>
+              {streak}일
+            </Text>
+            <Text style={styles.hCardSub}>
+              {streak > 0 ? '연속 스캔 중이에요' : '오늘부터 시작해요'}
+            </Text>
+            <TouchableOpacity onPress={goToFaceScanner}>
+              <Text style={[styles.hCardCta, { color: '#B8860B' }]}>오늘 스캔하기 →</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+
+        {/* ── SECTION 5: 오늘의 팁 ───────────────────────────────────────── */}
+        <View style={styles.tipCard}>
+          <View style={styles.tipHeader}>
+            <Text style={styles.tipEmoji}>{tipLabel === 'SKIN' ? '💙' : '💄'}</Text>
+            <Text
+              style={[
+                styles.tipLabel,
+                { color: tipLabel === 'SKIN' ? '#5BA3D9' : '#FF6B9D' },
+              ]}
+            >
+              오늘의 {tipLabel} 팁
+            </Text>
+          </View>
+          <Text style={styles.tipBody}>{tipText}</Text>
+        </View>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* ── SECTION 4: FLOATING QUICK ACTIONS ────────────────────────── */}
+      <View style={styles.fabRow} pointerEvents="box-none">
+        <TouchableOpacity
+          style={[styles.fab, styles.fabLook]}
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('Look')}
+        >
+          <Text style={styles.fabText}>💄 룩 찾기</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.fab, styles.fabSkin]}
+          activeOpacity={0.85}
+          onPress={goToFaceScanner}
+        >
+          <Text style={styles.fabText}>📸 피부 스캔</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const PAGE_BG = '#FDF6F9';
-const CARD_BG = '#FFFFFF';
+const PAGE_BG = '#FAFBFC';
 const PINK = '#F2A7C3';
 
 const styles = StyleSheet.create({
@@ -549,109 +779,119 @@ const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: PAGE_BG },
   content: { paddingBottom: 20 },
 
-  // Header
-  header: {
+  // Compact header
+  compactHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 8,
+    paddingBottom: 18,
+    gap: 10,
   },
-  wordmark: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: PINK,
-    letterSpacing: -0.5,
+  compactHeaderMain: {
+    flex: 1,
+    gap: 2,
   },
-
-  // Greeting
-  greeting: {
+  compactSubtitle: {
+    fontSize: 12,
+    color: '#8A8A9A',
+  },
+  compactName: {
     fontSize: 26,
     fontWeight: '700',
-    color: '#2D2D2D',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-  },
-
-  // D-Day card
-  ddayCard: {
-    marginHorizontal: 20,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 20,
-  },
-  ddayTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    color: '#1A1A2E',
     marginBottom: 8,
   },
-
-  ddayDateText: {
-    fontSize: 13,
-    color: '#fff',
-    marginLeft: 8,
-    opacity: 0.9,
-    flex: 1,
+  ddayPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
   },
-  ddaySparkles: { marginLeft: 'auto' as any },
-  ddayCount: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  ddaySub: {
-    fontSize: 13,
-    color: '#fff',
-    opacity: 0.85,
-    marginBottom: 12,
-  },
-  ddayChangeBtn: {
-    alignSelf: 'flex-start',
+  ddayPillSet: {
+    backgroundColor: '#FFF0F5',
+    borderColor: '#FFC4D6',
+    borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 5,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 50,
   },
-  ddayChangeBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  ddaySetBtn: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.35)',
-    marginTop: 4,
-  },
-  ddaySetBtnText: {
+  ddayPillTextSet: {
     fontSize: 13,
-    fontWeight: '700',
-    color: '#fff',
+    color: '#FF6B9D',
+    fontWeight: '600',
+  },
+  ddayChangeLink: {
+    fontSize: 11,
+    color: '#8A8A9A',
+  },
+  ddayPillUnset: {
+    backgroundColor: '#F5F5F5',
+    borderColor: '#E0E0E0',
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 50,
+  },
+  ddayPillTextUnset: {
+    fontSize: 13,
+    color: '#8A8A9A',
+  },
+  settingsBtn: {
+    padding: 2,
   },
 
-  // Calendar
+  // Section title
   sectionTitle: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '600',
-    color: '#2D2D2D',
+    color: '#1A1A2E',
     paddingHorizontal: 20,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   calendarCard: {
     marginHorizontal: 20,
-    backgroundColor: CARD_BG,
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    borderRadius: 20,
     marginBottom: 16,
-    shadowColor: PINK,
-    shadowOffset: { width: 0, height: 2 },
+    borderWidth: 1,
+    borderColor: 'rgba(220,220,230,0.5)',
+    shadowColor: '#B0B0B0',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
-    shadowRadius: 8,
+    shadowRadius: 12,
     elevation: 3,
+    overflow: 'hidden',
+  },
+  calFoldHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: 'rgba(184,216,240,0.2)',
+  },
+  calFoldTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#2D2D2D',
+  },
+  calFoldPill: {
+    marginLeft: 'auto',
+    backgroundColor: '#FFC4D6',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  calFoldPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#C44777',
+  },
+  calContent: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 16,
   },
   calMonthRow: {
     flexDirection: 'row',
@@ -759,102 +999,231 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Routine
-  routineRow: {
+  // Section 2 — SKIN + LOOK dual
+  dualRow: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    gap: 12,
-    marginBottom: 14,
+    gap: 10,
+    marginBottom: 18,
   },
-  routineCard: {
+  dualCard: {
     flex: 1,
-    backgroundColor: CARD_BG,
-    borderRadius: 16,
-    padding: 16,
-    alignItems: 'stretch',
-    borderWidth: 1,
-    borderColor: '#F0E6EC',
-    gap: 8,
+    borderRadius: 20,
+    padding: 14,
+    gap: 10,
+    borderWidth: 1.5,
   },
-  routineCardTop: {
+  skinCard: {
+    backgroundColor: '#E8F4FD',
+    borderColor: '#B8D8F0',
+  },
+  lookCard: {
+    backgroundColor: '#FFF0F5',
+    borderColor: '#FFC4D6',
+  },
+  dualCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: 6,
   },
-  routineSummary: {
-    fontSize: 11,
-    color: '#666',
-    lineHeight: 15,
+  dualCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
-  routineHint: {
-    fontSize: 11,
-    color: '#bbb',
-    lineHeight: 15,
+  dualCheckRow: {
+    flexDirection: 'row',
+    gap: 14,
+    minHeight: 44,
+    alignItems: 'center',
   },
-  routineCardAmDone: {
-    backgroundColor: '#FFF0F6',
-    borderColor: PINK,
+  dualCheckItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  routineCardPmDone: {
-    backgroundColor: '#F0F6FF',
-    borderColor: '#A8D5E8',
-  },
-  routineLabel: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#2D2D2D',
-  },
-  routineCheckCircle: {
+  dualCheckCircle: {
     width: 22,
     height: 22,
     borderRadius: 11,
     borderWidth: 1.5,
-    borderColor: '#ddd',
+    borderColor: '#5BA3D9',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
   },
-
-  // Streak
-  streakBanner: {
-    marginHorizontal: 20,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 14,
+  dualCheckCircleDone: {
+    backgroundColor: '#5BA3D9',
+    borderColor: '#5BA3D9',
   },
-  streakTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#B8860B',
-  },
-  streakSub: {
+  dualCheckLabel: {
     fontSize: 12,
-    color: '#B8860B',
-    opacity: 0.8,
+    fontWeight: '700',
+    color: '#1A1A2E',
+  },
+  dualBodyBox: {
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  lookVibeText: {
+    fontSize: 12,
+    color: '#FF6B9D',
+    fontWeight: '600',
+    lineHeight: 18,
+  },
+  dualCta: {
+    borderRadius: 50,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dualCtaText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+
+  // Section 3 — horizontal activity scroll
+  hScrollContent: {
+    paddingHorizontal: 20,
+    paddingVertical: 4,
+    gap: 12,
+  },
+  hCard: {
+    width: 160,
+    maxHeight: 150,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderLeftWidth: 3,
+    borderColor: 'rgba(220,220,230,0.5)',
+    gap: 6,
+    shadowColor: '#B0B0B0',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.10,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  hCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1A1A2E',
+  },
+  hCardBody: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 17,
+    minHeight: 34,
+  },
+  hCardScore: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#2D2D2D',
     marginTop: 2,
   },
+  hCardScoreLatest: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#5BA3D9',
+  },
+  hCardSub: {
+    fontSize: 11,
+    color: '#999',
+  },
+  hCardCta: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 6,
+  },
+  miniBarRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 4,
+    height: 48,
+    marginVertical: 4,
+  },
+  miniBar: {
+    flex: 1,
+    borderRadius: 2,
+    minHeight: 6,
+  },
+  swatchRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 6,
+  },
+  swatchDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.08)',
+  },
 
-  // Scan hero
-  scanHero: {
+  // Section 5 — tip of the day
+  tipCard: {
     marginHorizontal: 20,
-    backgroundColor: PINK,
-    borderRadius: 16,
+    marginTop: 18,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(220,220,230,0.4)',
+    shadowColor: '#B0B0B0',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.10,
+    shadowRadius: 10,
+    elevation: 2,
+    gap: 6,
+  },
+  tipHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 18,
-    gap: 14,
+    gap: 6,
   },
-  scanHeroText: { flex: 1 },
-  scanHeroTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 2,
-  },
-  scanHeroDesc: {
+  tipEmoji: { fontSize: 16 },
+  tipLabel: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.85)',
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  tipBody: {
+    fontSize: 13,
+    color: '#1A1A2E',
+    lineHeight: 20,
+  },
+
+  // Section 4 — floating FABs
+  fabRow: {
+    position: 'absolute',
+    right: 20,
+    bottom: 20,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  fab: {
+    height: 52,
+    paddingHorizontal: 20,
+    borderRadius: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  fabLook: {
+    backgroundColor: '#FF6B9D',
+    shadowColor: '#FF6B9D',
+  },
+  fabSkin: {
+    backgroundColor: '#5BA3D9',
+    shadowColor: '#5BA3D9',
+  },
+  fabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,16 +6,22 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  useWindowDimensions,
+  LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Svg, { Path, Ellipse } from 'react-native-svg';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
 import { supabase } from '../../services/supabase';
 import { MainStackParamList, ScanAnalysisResult } from '../../types';
+import {
+  SkinScanGuideModal,
+  SKIP_GUIDE_KEY,
+} from '../../components/SkinScanGuideModal';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
@@ -103,13 +109,31 @@ const runAnalysis = async (base64String: string): Promise<ScanAnalysisResult> =>
 
 export function FaceScannerScreen() {
   const navigation = useNavigation<Nav>();
-  const { width, height } = useWindowDimensions();
   const [permission, requestPermission] = useCameraPermissions();
   const [step, setStep] = useState<ScanStep>('idle');
+  const [layout, setLayout] = useState<{ width: number; height: number } | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
   const cameraRef = useRef<CameraView>(null);
 
-  const ovalWidth = width * 0.62;
-  const ovalHeight = ovalWidth * 1.35;
+  useEffect(() => {
+    AsyncStorage.getItem(SKIP_GUIDE_KEY).then((val) => {
+      if (val !== 'true') setShowGuide(true);
+    });
+  }, []);
+
+  const handleContainerLayout = (e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setLayout({ width, height });
+  };
+
+  const width = layout?.width ?? 0;
+  const height = layout?.height ?? 0;
+  // Oval: 75% of screen width, ~1.2x that for height, horizontally centered,
+  // vertically placed so it sits in the upper ~60% of the frame.
+  const ovalRx = (width * 0.75) / 2;
+  const ovalRy = ovalRx * 1.2;
+  const ovalCx = width / 2;
+  const ovalCy = height * 0.42;
 
   const handleCapture = async () => {
     if (step !== 'idle' || !cameraRef.current) return;
@@ -172,7 +196,7 @@ export function FaceScannerScreen() {
 
   // ── 카메라 뷰 ─────────────────────────────────────────────────────────────
   return (
-    <View style={styles.cameraContainer}>
+    <View style={styles.cameraContainer} onLayout={handleContainerLayout}>
       <CameraView
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
@@ -189,39 +213,30 @@ export function FaceScannerScreen() {
         </Text>
       </SafeAreaView>
 
-      {/* 오발 페이스 가이드 + 딤 오버레이 */}
-      <View style={styles.overlayWrapper}>
-        {/* 상단 딤 */}
-        <View style={[styles.dimBlock, { height: (height - ovalHeight) / 2 - 40 }]} />
-
-        {/* 오발 행 */}
-        <View style={{ flexDirection: 'row', height: ovalHeight }}>
-          <View style={styles.dimBlock} />
-          <View
-            style={[
-              styles.ovalCutout,
-              { width: ovalWidth, height: ovalHeight, borderRadius: ovalWidth / 2 },
-            ]}
+      {/* 오발 가이드 + 딤 — SVG evenodd cutout, pink ellipse stroke */}
+      {width > 0 && height > 0 && (
+        <Svg
+          width={width}
+          height={height}
+          style={StyleSheet.absoluteFillObject}
+          pointerEvents="none"
+        >
+          <Path
+            d={`M 0 0 H ${width} V ${height} H 0 Z M ${ovalCx - ovalRx} ${ovalCy} A ${ovalRx} ${ovalRy} 0 1 0 ${ovalCx + ovalRx} ${ovalCy} A ${ovalRx} ${ovalRy} 0 1 0 ${ovalCx - ovalRx} ${ovalCy} Z`}
+            fill="rgba(0,0,0,0.4)"
+            fillRule="evenodd"
           />
-          <View style={styles.dimBlock} />
-        </View>
-
-        {/* 하단 딤 */}
-        <View style={[styles.dimBlock, { flex: 1 }]} />
-      </View>
-
-      {/* 오발 테두리 */}
-      <View
-        pointerEvents="none"
-        style={[
-          styles.ovalBorder,
-          {
-            width: ovalWidth,
-            height: ovalHeight,
-            borderRadius: ovalWidth / 2,
-          },
-        ]}
-      />
+          <Ellipse
+            cx={ovalCx}
+            cy={ovalCy}
+            rx={ovalRx}
+            ry={ovalRy}
+            stroke="#FF6B9D"
+            strokeWidth={2}
+            fill="none"
+          />
+        </Svg>
+      )}
 
       {/* 분석 중 오버레이 */}
       {step === 'analyzing' && (
@@ -248,6 +263,16 @@ export function FaceScannerScreen() {
           )}
         </SafeAreaView>
       )}
+
+      {/* 스캔 가이드 모달 */}
+      <SkinScanGuideModal
+        visible={showGuide}
+        onCancel={() => {
+          setShowGuide(false);
+          navigation.goBack();
+        }}
+        onConfirm={() => setShowGuide(false)}
+      />
     </View>
   );
 }
@@ -297,29 +322,6 @@ const styles = StyleSheet.create({
     ...Typography.caption,
     color: 'rgba(255,255,255,0.75)',
     marginTop: 4,
-  },
-
-  // 딤 오버레이
-  overlayWrapper: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1,
-  },
-  dimBlock: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  ovalCutout: {
-    backgroundColor: 'transparent',
-  },
-
-  // 오발 테두리
-  ovalBorder: {
-    position: 'absolute',
-    alignSelf: 'center',
-    top: '20%',
-    borderWidth: 2.5,
-    borderColor: Colors.accent,
-    zIndex: 2,
   },
 
   // 분석 중 오버레이

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -62,36 +62,52 @@ export function MyPageScreen() {
   const [isPremium, setIsPremium] = useState(false);
   const [scans, setScans] = useState<ScanRow[]>([]);
 
-  useEffect(() => {
-    const load = async () => {
-      // Premium status
+  const loadProfile = async () => {
+    // Premium status (cheap — no auth call)
+    try {
+      const raw = await AsyncStorage.getItem('meve_is_premium');
+      if (raw === 'true') setIsPremium(true);
+    } catch {}
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    if (user.email) setEmail(user.email);
+
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('display_name')
+      .eq('id', user.id)
+      .single();
+    if (profile?.display_name) {
+      setDisplayName(profile.display_name);
+    } else {
+      // Fallback to a locally cached name (e.g. just-saved edit before
+      // Supabase propagation completes).
       try {
-        const raw = await AsyncStorage.getItem('meve_is_premium');
-        if (raw === 'true') setIsPremium(true);
+        const cached = await AsyncStorage.getItem('meve_display_name');
+        if (cached) setDisplayName(cached);
       } catch {}
+    }
 
-      // User profile
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      if (user.email) setEmail(user.email);
+    // Scan history
+    const { data: scanData } = await supabase
+      .from('skin_scans')
+      .select('id, created_at, scan_result')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+    if (scanData) setScans(scanData as ScanRow[]);
+  };
 
-      const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('display_name')
-        .eq('id', user.id)
-        .single();
-      if (profile?.display_name) setDisplayName(profile.display_name);
+  useEffect(() => {
+    loadProfile();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-      // Scan history
-      const { data: scanData } = await supabase
-        .from('skin_scans')
-        .select('id, created_at, scan_result')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-      if (scanData) setScans(scanData as ScanRow[]);
-    };
-    load();
-  }, []);
+  // Re-fetch on focus so profile edits propagate immediately.
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile();
+    }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   const handleLogout = () => {
     Alert.alert('로그아웃', '정말 로그아웃할까요?', [
@@ -108,10 +124,24 @@ export function MyPageScreen() {
   };
 
   const handleMenuPress = (label: string) => {
-    if (label === '로그아웃') {
-      handleLogout();
-    } else {
-      Alert.alert('준비 중', '이 기능은 곧 추가될 예정이에요!');
+    switch (label) {
+      case '프로필 수정':
+        navigation.navigate('ProfileEdit');
+        return;
+      case '알림 설정':
+        navigation.navigate('NotificationSettings');
+        return;
+      case '개인정보 처리방침':
+        navigation.navigate('PrivacyPolicy');
+        return;
+      case '이용약관':
+        navigation.navigate('TermsOfService');
+        return;
+      case '로그아웃':
+        handleLogout();
+        return;
+      default:
+        Alert.alert('준비 중', '이 기능은 곧 추가될 예정이에요!');
     }
   };
 
