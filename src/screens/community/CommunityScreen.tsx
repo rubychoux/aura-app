@@ -17,12 +17,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { CompositeNavigationProp } from '@react-navigation/native';
 import { supabase } from '../../services/supabase';
+import { MEVE_GRADIENT_SIMPLE } from '../../constants/theme';
 import {
   MainStackParamList,
   MainTabParamList,
@@ -41,6 +43,16 @@ type Nav = CompositeNavigationProp<
 const PINK = '#FF6B9D';
 const BLUE = '#5BA3D9';
 const PURPLE = '#9B59B6';
+
+// Pastel tag palette — matches meve logo gradient (baby pink → lavender → baby blue)
+const TAG_PINK = '#C87A9B';
+const TAG_PINK_BG = '#FCE4EE';
+const TAG_LAVENDER = '#9B8CC4';
+const TAG_LAVENDER_BG = '#F3E8FA';
+const TAG_BLUE = '#7BA0C4';
+const TAG_BLUE_BG = '#E3F0FA';
+const TAG_GRAY = '#8A8A9A';
+const TAG_GRAY_BG = '#F5F5F5';
 
 interface EventChip {
   key: string | null;
@@ -76,6 +88,9 @@ const SKIN_TYPES = ['건성', '지성', '복합성', '민감성'];
 const PERSONAL_COLORS = ['봄 웜톤', '여름 쿨톤', '가을 웜톤', '겨울 쿨톤'];
 const VIBES = ['청순', '글로우', '볼드', '내추럴', '빈티지', '클린걸', '테토녀', '에겐녀'];
 const FACE_SHAPES = ['계란형', '하트형', '둥근형', '각진형', '긴형'];
+
+const isValidValue = (val: string | null | undefined): val is string =>
+  !!val && val.trim() !== '' && val.toLowerCase() !== 'unknown';
 
 function normalizePersonalColor(input: string | null | undefined): string | null {
   if (!input) return null;
@@ -171,17 +186,18 @@ export function CommunityScreen() {
       const m = Object.fromEntries(pairs) as Record<string, string | null>;
 
       const personal_color = normalizePersonalColor(m['meve_personal_color']);
-      const vibe = m['meve_vibe'];
+      const vibe = isValidValue(m['meve_vibe']) ? m['meve_vibe'] : null;
 
       let face_shape: string | null = null;
       if (m['meve_face_analysis']) {
         try {
           const parsed = JSON.parse(m['meve_face_analysis']) as FaceAnalysisResult;
-          face_shape = parsed.faceShape ?? null;
+          const fs = parsed.faceShape;
+          face_shape = isValidValue(fs) ? fs : null;
         } catch {}
       }
 
-      const event_type = m['meve_event_type'];
+      const event_type = isValidValue(m['meve_event_type']) ? m['meve_event_type'] : null;
       let dday_count: number | null = null;
       if (m['meve_event_date']) {
         const today = new Date();
@@ -215,12 +231,13 @@ export function CommunityScreen() {
           .select('skin_type')
           .eq('id', user.id)
           .maybeSingle();
-        skin_type = profRow?.skin_type ?? null;
+        const rawSkinType = profRow?.skin_type ?? null;
+        skin_type = isValidValue(rawSkinType) ? rawSkinType : null;
       }
 
       setProfile({
         skinScore,
-        personal_color,
+        personal_color: isValidValue(personal_color) ? personal_color : null,
         vibe,
         face_shape,
         event_type,
@@ -248,20 +265,21 @@ export function CommunityScreen() {
         .limit(20);
 
       if (feedTab === 'mine') {
-        // Auto-filter by profile, excluding any keys the user ✕'d
-        if (profile.personal_color && !excludedAutoKeys.has('personal_color'))
+        // Auto-filter by profile, excluding any keys the user ✕'d.
+        // Never filter on blank / 'unknown' values.
+        if (isValidValue(profile.personal_color) && !excludedAutoKeys.has('personal_color'))
           query = query.eq('personal_color', profile.personal_color);
-        if (profile.vibe && !excludedAutoKeys.has('vibe'))
+        if (isValidValue(profile.vibe) && !excludedAutoKeys.has('vibe'))
           query = query.eq('vibe', profile.vibe);
-        if (profile.face_shape && !excludedAutoKeys.has('face_shape'))
+        if (isValidValue(profile.face_shape) && !excludedAutoKeys.has('face_shape'))
           query = query.eq('face_shape', profile.face_shape);
         if (
-          profile.event_type &&
+          isValidValue(profile.event_type) &&
           profile.event_type !== '기타' &&
           !excludedAutoKeys.has('event_type')
         )
           query = query.eq('event_type', profile.event_type);
-        if (profile.skin_type && !excludedAutoKeys.has('skin_type'))
+        if (isValidValue(profile.skin_type) && !excludedAutoKeys.has('skin_type'))
           query = query.eq('skin_type', profile.skin_type);
       } else {
         // Manual filters (전체 tab)
@@ -348,13 +366,18 @@ export function CommunityScreen() {
         .from('posts')
         .select('id', { count: 'exact', head: true })
         .eq('is_public', true);
-      if (profile.personal_color) q = q.eq('personal_color', profile.personal_color);
-      if (profile.vibe) q = q.eq('vibe', profile.vibe);
-      if (profile.skin_type) q = q.eq('skin_type', profile.skin_type);
-      if (profile.event_type) q = q.eq('event_type', profile.event_type);
+      if (isValidValue(profile.personal_color))
+        q = q.eq('personal_color', profile.personal_color);
+      if (isValidValue(profile.vibe)) q = q.eq('vibe', profile.vibe);
+      if (isValidValue(profile.skin_type)) q = q.eq('skin_type', profile.skin_type);
+      if (isValidValue(profile.event_type))
+        q = q.eq('event_type', profile.event_type);
       // Only query if at least one filter applies
       const hasAny =
-        profile.personal_color || profile.vibe || profile.skin_type || profile.event_type;
+        isValidValue(profile.personal_color) ||
+        isValidValue(profile.vibe) ||
+        isValidValue(profile.skin_type) ||
+        isValidValue(profile.event_type);
       if (!hasAny) {
         setSimilarCount(null);
         return;
@@ -442,50 +465,50 @@ export function CommunityScreen() {
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const hasProfile =
-    !!profile.personal_color ||
-    !!profile.vibe ||
-    !!profile.face_shape ||
-    !!profile.event_type ||
-    !!profile.skin_type ||
+    isValidValue(profile.personal_color) ||
+    isValidValue(profile.vibe) ||
+    isValidValue(profile.face_shape) ||
+    isValidValue(profile.event_type) ||
+    isValidValue(profile.skin_type) ||
     profile.skinScore != null;
 
   const myFitPills: Array<{ key: keyof MyProfile; label: string; color: string; bg: string }> = [];
-  if (profile.event_type && !excludedAutoKeys.has('event_type'))
+  if (isValidValue(profile.event_type) && !excludedAutoKeys.has('event_type'))
     myFitPills.push({
       key: 'event_type',
       label: `${EVENT_EMOJI[profile.event_type] ?? '✨'} ${EVENT_LABEL[profile.event_type] ?? profile.event_type}${
         profile.dday_count != null ? ` D-${profile.dday_count}` : ''
       }`,
-      color: PINK,
-      bg: '#FFF0F5',
+      color: TAG_PINK,
+      bg: TAG_PINK_BG,
     });
-  if (profile.personal_color && !excludedAutoKeys.has('personal_color'))
+  if (isValidValue(profile.personal_color) && !excludedAutoKeys.has('personal_color'))
     myFitPills.push({
       key: 'personal_color',
       label: profile.personal_color,
-      color: PURPLE,
-      bg: '#F0E8FD',
+      color: TAG_LAVENDER,
+      bg: TAG_LAVENDER_BG,
     });
-  if (profile.vibe && !excludedAutoKeys.has('vibe'))
+  if (isValidValue(profile.vibe) && !excludedAutoKeys.has('vibe'))
     myFitPills.push({
       key: 'vibe',
       label: profile.vibe,
-      color: PINK,
-      bg: '#FFF0F5',
+      color: TAG_PINK,
+      bg: TAG_PINK_BG,
     });
-  if (profile.skin_type && !excludedAutoKeys.has('skin_type'))
+  if (isValidValue(profile.skin_type) && !excludedAutoKeys.has('skin_type'))
     myFitPills.push({
       key: 'skin_type',
       label: profile.skin_type,
-      color: BLUE,
-      bg: '#E8F4FD',
+      color: TAG_BLUE,
+      bg: TAG_BLUE_BG,
     });
-  if (profile.face_shape && !excludedAutoKeys.has('face_shape'))
+  if (isValidValue(profile.face_shape) && !excludedAutoKeys.has('face_shape'))
     myFitPills.push({
       key: 'face_shape',
       label: profile.face_shape,
-      color: '#5A5A65',
-      bg: '#F5F5F5',
+      color: TAG_GRAY,
+      bg: TAG_GRAY_BG,
     });
 
   const removeAutoKey = (k: keyof MyProfile) =>
@@ -527,36 +550,36 @@ export function CommunityScreen() {
     }
     return (
       <View style={styles.heroCard}>
-        <Text style={styles.heroTitle}>My Beauty Report</Text>
+        <Text style={styles.heroTitle}>내 뷰티 리포트 ✨</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.heroPillRow}
         >
           {profile.skinScore != null && (
-            <View style={[styles.heroPill, { backgroundColor: '#E8F4FD' }]}>
-              <Text style={[styles.heroPillText, { color: BLUE }]}>
+            <View style={[styles.heroPill, { backgroundColor: TAG_BLUE_BG }]}>
+              <Text style={[styles.heroPillText, { color: TAG_BLUE }]}>
                 스킨 {profile.skinScore}점
               </Text>
             </View>
           )}
-          {profile.personal_color && (
-            <View style={[styles.heroPill, { backgroundColor: '#F0E8FD' }]}>
-              <Text style={[styles.heroPillText, { color: PURPLE }]}>
+          {isValidValue(profile.personal_color) && (
+            <View style={[styles.heroPill, { backgroundColor: TAG_LAVENDER_BG }]}>
+              <Text style={[styles.heroPillText, { color: TAG_LAVENDER }]}>
                 {profile.personal_color}
               </Text>
             </View>
           )}
-          {profile.vibe && (
-            <View style={[styles.heroPill, { backgroundColor: '#FFF0F5' }]}>
-              <Text style={[styles.heroPillText, { color: PINK }]}>
+          {isValidValue(profile.vibe) && (
+            <View style={[styles.heroPill, { backgroundColor: TAG_PINK_BG }]}>
+              <Text style={[styles.heroPillText, { color: TAG_PINK }]}>
                 {profile.vibe}
               </Text>
             </View>
           )}
-          {profile.event_type && (
-            <View style={[styles.heroPill, { backgroundColor: '#FFF0F5' }]}>
-              <Text style={[styles.heroPillText, { color: PINK }]}>
+          {isValidValue(profile.event_type) && (
+            <View style={[styles.heroPill, { backgroundColor: TAG_PINK_BG }]}>
+              <Text style={[styles.heroPillText, { color: TAG_PINK }]}>
                 {EVENT_EMOJI[profile.event_type] ?? '✨'}{' '}
                 {profile.dday_count != null
                   ? `D-${profile.dday_count}`
@@ -650,7 +673,7 @@ export function CommunityScreen() {
       </View>
 
       <View style={styles.headerRow}>
-        <Text style={styles.title}>커뮤니티</Text>
+        <Text style={styles.title}>eve</Text>
         <View style={styles.headerIcons}>
           <TouchableOpacity
             style={styles.iconBtnWrap}
@@ -658,9 +681,9 @@ export function CommunityScreen() {
             activeOpacity={0.75}
           >
             <View style={[styles.iconBtn, styles.iconBtnGlam]}>
-              <Ionicons name="people" size={20} color={PINK} />
+              <Ionicons name="people" size={20} color={TAG_PINK} />
             </View>
-            <Text style={[styles.iconBtnLabel, { color: PINK }]}>글램</Text>
+            <Text style={[styles.iconBtnLabel, { color: TAG_PINK }]}>글램</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.iconBtnWrap}
@@ -668,9 +691,9 @@ export function CommunityScreen() {
             activeOpacity={0.75}
           >
             <View style={[styles.iconBtn, styles.iconBtnPoll]}>
-              <Ionicons name="thumbs-up" size={18} color={BLUE} />
+              <Ionicons name="thumbs-up" size={18} color={TAG_BLUE} />
             </View>
-            <Text style={[styles.iconBtnLabel, { color: BLUE }]}>투표</Text>
+            <Text style={[styles.iconBtnLabel, { color: TAG_BLUE }]}>투표</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -680,26 +703,42 @@ export function CommunityScreen() {
       {/* Feed tabs */}
       <View style={styles.tabRow}>
         <TouchableOpacity
-          style={[styles.tab, feedTab === 'mine' && styles.tabActive]}
           onPress={() => setFeedTab('mine')}
           activeOpacity={0.8}
         >
-          <Text
-            style={[styles.tabText, feedTab === 'mine' && styles.tabTextActive]}
-          >
-            내 핏 ✨
-          </Text>
+          {feedTab === 'mine' ? (
+            <LinearGradient
+              colors={MEVE_GRADIENT_SIMPLE.colors}
+              start={MEVE_GRADIENT_SIMPLE.start}
+              end={MEVE_GRADIENT_SIMPLE.end}
+              style={styles.tab}
+            >
+              <Text style={styles.tabTextActive}>내 핏 ✨</Text>
+            </LinearGradient>
+          ) : (
+            <View style={styles.tab}>
+              <Text style={styles.tabText}>내 핏 ✨</Text>
+            </View>
+          )}
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.tab, feedTab === 'all' && styles.tabActive]}
           onPress={() => setFeedTab('all')}
           activeOpacity={0.8}
         >
-          <Text
-            style={[styles.tabText, feedTab === 'all' && styles.tabTextActive]}
-          >
-            전체
-          </Text>
+          {feedTab === 'all' ? (
+            <LinearGradient
+              colors={MEVE_GRADIENT_SIMPLE.colors}
+              start={MEVE_GRADIENT_SIMPLE.start}
+              end={MEVE_GRADIENT_SIMPLE.end}
+              style={styles.tab}
+            >
+              <Text style={styles.tabTextActive}>전체</Text>
+            </LinearGradient>
+          ) : (
+            <View style={styles.tab}>
+              <Text style={styles.tabText}>전체</Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -741,19 +780,19 @@ export function CommunityScreen() {
               selectedEvent
                 ? EVENT_CHIPS.find((c) => c.key === selectedEvent)?.label ?? null
                 : null,
-              PINK,
+              TAG_PINK,
               () => setSelectedEvent(null)
             )}
-            {renderFilterTypeChip('skin', '피부', selectedSkinType, BLUE, () =>
+            {renderFilterTypeChip('skin', '피부', selectedSkinType, TAG_BLUE, () =>
               setSelectedSkinType(null)
             )}
-            {renderFilterTypeChip('color', '컬러', selectedPersonalColor, PURPLE, () =>
+            {renderFilterTypeChip('color', '컬러', selectedPersonalColor, TAG_LAVENDER, () =>
               setSelectedPersonalColor(null)
             )}
-            {renderFilterTypeChip('vibe', '추구미', selectedVibe, PINK, () =>
+            {renderFilterTypeChip('vibe', '추구미', selectedVibe, TAG_PINK, () =>
               setSelectedVibe(null)
             )}
-            {renderFilterTypeChip('face', '얼굴형', selectedFaceShape, '#5A5A65', () =>
+            {renderFilterTypeChip('face', '얼굴형', selectedFaceShape, TAG_GRAY, () =>
               setSelectedFaceShape(null)
             )}
           </ScrollView>
@@ -773,8 +812,8 @@ export function CommunityScreen() {
                       setSelectedEvent(c.key);
                       setExpandedFilter(null);
                     },
-                    PINK,
-                    '#FFF0F5'
+                    TAG_PINK,
+                    TAG_PINK_BG
                   )
                 )}
               {expandedFilter === 'skin' &&
@@ -786,8 +825,8 @@ export function CommunityScreen() {
                       setSelectedSkinType(selectedSkinType === s ? null : s);
                       setExpandedFilter(null);
                     },
-                    BLUE,
-                    '#E8F4FD'
+                    TAG_BLUE,
+                    TAG_BLUE_BG
                   )
                 )}
               {expandedFilter === 'color' &&
@@ -799,8 +838,8 @@ export function CommunityScreen() {
                       setSelectedPersonalColor(selectedPersonalColor === pc ? null : pc);
                       setExpandedFilter(null);
                     },
-                    PURPLE,
-                    '#F0E8FD'
+                    TAG_LAVENDER,
+                    TAG_LAVENDER_BG
                   )
                 )}
               {expandedFilter === 'vibe' &&
@@ -812,8 +851,8 @@ export function CommunityScreen() {
                       setSelectedVibe(selectedVibe === v ? null : v);
                       setExpandedFilter(null);
                     },
-                    PINK,
-                    '#FFF0F5'
+                    TAG_PINK,
+                    TAG_PINK_BG
                   )
                 )}
               {expandedFilter === 'face' &&
@@ -825,8 +864,8 @@ export function CommunityScreen() {
                       setSelectedFaceShape(selectedFaceShape === f ? null : f);
                       setExpandedFilter(null);
                     },
-                    '#5A5A65',
-                    '#F5F5F5'
+                    TAG_GRAY,
+                    TAG_GRAY_BG
                   )
                 )}
             </ScrollView>
@@ -877,11 +916,18 @@ export function CommunityScreen() {
         </Text>
         <Text style={styles.emptyDesc}>조건에 맞는 첫 번째 게시글을 올려봐요!</Text>
         <TouchableOpacity
-          style={styles.emptyCta}
+          style={styles.emptyCtaShadow}
           onPress={() => navigation.navigate('CreatePost')}
           activeOpacity={0.85}
         >
-          <Text style={styles.emptyCtaText}>게시글 올리기</Text>
+          <LinearGradient
+            colors={MEVE_GRADIENT_SIMPLE.colors}
+            start={MEVE_GRADIENT_SIMPLE.start}
+            end={MEVE_GRADIENT_SIMPLE.end}
+            style={styles.emptyCta}
+          >
+            <Text style={styles.emptyCtaText}>게시글 올리기</Text>
+          </LinearGradient>
         </TouchableOpacity>
       </View>
     );
@@ -914,11 +960,18 @@ export function CommunityScreen() {
       />
 
       <TouchableOpacity
-        style={styles.fab}
+        style={styles.fabShadow}
         onPress={() => navigation.navigate('CreatePost')}
         activeOpacity={0.85}
       >
-        <Ionicons name="create" size={22} color="#fff" />
+        <LinearGradient
+          colors={['#F9C4D8', '#C4B8E8', '#B8D4F0']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.fab}
+        >
+          <Ionicons name="create" size={22} color="#fff" />
+        </LinearGradient>
       </TouchableOpacity>
     </SafeAreaView>
   );
@@ -961,29 +1014,29 @@ function PostCard({ post, onToggleLike, onOpen, onShare }: PostCardProps) {
       </View>
 
       <View style={styles.tagRow}>
-        {post.dday_count != null && post.event_type && (
+        {post.dday_count != null && isValidValue(post.event_type) && (
           <View style={[styles.tag, styles.tagPink]}>
             <Text style={styles.tagPinkText}>
               {EVENT_EMOJI[post.event_type] ?? '✨'} D-{post.dday_count}
             </Text>
           </View>
         )}
-        {post.personal_color && (
+        {isValidValue(post.personal_color) && (
           <View style={[styles.tag, styles.tagPurple]}>
             <Text style={styles.tagPurpleText}>{post.personal_color}</Text>
           </View>
         )}
-        {post.vibe && (
+        {isValidValue(post.vibe) && (
           <View style={[styles.tag, styles.tagPink]}>
             <Text style={styles.tagPinkText}>{post.vibe}</Text>
           </View>
         )}
-        {post.skin_type && (
+        {isValidValue(post.skin_type) && (
           <View style={[styles.tag, styles.tagBlue]}>
             <Text style={styles.tagBlueText}>{post.skin_type}</Text>
           </View>
         )}
-        {post.face_shape && (
+        {isValidValue(post.face_shape) && (
           <View style={[styles.tag, styles.tagGray]}>
             <Text style={styles.tagGrayText}>{post.face_shape}</Text>
           </View>
@@ -1094,20 +1147,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconBtnGlam: { backgroundColor: '#FFF0F5' },
-  iconBtnPoll: { backgroundColor: '#E8F4FD' },
+  iconBtnGlam: { backgroundColor: TAG_PINK_BG },
+  iconBtnPoll: { backgroundColor: TAG_BLUE_BG },
   iconBtnLabel: { fontSize: 10, fontWeight: '700' },
 
-  // Hero card
+  // Hero card — MyPage aesthetic
   heroCard: {
     marginHorizontal: 16,
     marginTop: 2,
     marginBottom: 14,
-    backgroundColor: 'rgba(255,255,255,0.85)',
+    backgroundColor: '#FFFFFF',
     borderRadius: 20,
     padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(220,220,230,0.5)',
     shadowColor: '#B0B0B0',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.10,
@@ -1154,14 +1205,15 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   tab: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     borderRadius: 50,
-    backgroundColor: 'transparent',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
   },
-  tabActive: { backgroundColor: PINK },
-  tabText: { fontSize: 13, fontWeight: '700', color: '#8A8A9A' },
-  tabTextActive: { color: '#fff' },
+  tabText: { fontSize: 13, fontWeight: '600', color: '#8A8A9A' },
+  tabTextActive: { fontSize: 13, fontWeight: '600', color: '#FFFFFF' },
 
   // 내 핏 active pills
   myFitRow: {
@@ -1231,8 +1283,15 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A2E', textAlign: 'center' },
   emptyDesc: { fontSize: 13, color: '#8A8A9A', textAlign: 'center', lineHeight: 19 },
   emptyBtnRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  emptyCtaShadow: {
+    borderRadius: 50,
+    shadowColor: '#B0B0B0',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 3,
+  },
   emptyCta: {
-    backgroundColor: PINK,
     borderRadius: 50,
     height: 52,
     paddingHorizontal: 22,
@@ -1246,20 +1305,18 @@ const styles = StyleSheet.create({
   },
   emptyCtaText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 
-  // Post card
+  // Post card — MyPage aesthetic
   postCard: {
     marginHorizontal: 16,
     marginTop: 12,
-    backgroundColor: 'rgba(255,255,255,0.9)',
+    backgroundColor: '#FFFFFF',
     borderRadius: 20,
     padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(220,220,230,0.5)',
     shadowColor: '#B0B0B0',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.10,
+    shadowRadius: 12,
+    elevation: 3,
     gap: 10,
   },
   postHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -1267,25 +1324,25 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#FFF0F5',
+    backgroundColor: TAG_PINK_BG,
     borderWidth: 1.5,
-    borderColor: '#FFC4D6',
+    borderColor: '#F9C4D8',
   },
   avatarFallback: { alignItems: 'center', justifyContent: 'center' },
-  avatarInitial: { color: PINK, fontWeight: '800', fontSize: 14 },
+  avatarInitial: { color: TAG_PINK, fontWeight: '800', fontSize: 14 },
   postName: { fontSize: 14, fontWeight: '700', color: '#1A1A2E' },
   postTime: { fontSize: 12, color: '#8A8A9A', marginTop: 1 },
 
   tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  tag: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 50, borderWidth: 1 },
-  tagPink: { backgroundColor: '#FFF0F5', borderColor: '#FFC4D6' },
-  tagPinkText: { fontSize: 11, color: PINK, fontWeight: '600' },
-  tagPurple: { backgroundColor: '#F0E8FD', borderColor: '#D8C4EF' },
-  tagPurpleText: { fontSize: 11, color: PURPLE, fontWeight: '600' },
-  tagBlue: { backgroundColor: '#E8F4FD', borderColor: '#B8D8F0' },
-  tagBlueText: { fontSize: 11, color: BLUE, fontWeight: '600' },
-  tagGray: { backgroundColor: '#F5F5F5', borderColor: '#E0E0E0' },
-  tagGrayText: { fontSize: 11, color: '#5A5A65', fontWeight: '600' },
+  tag: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 50 },
+  tagPink: { backgroundColor: TAG_PINK_BG },
+  tagPinkText: { fontSize: 11, color: TAG_PINK, fontWeight: '600' },
+  tagPurple: { backgroundColor: TAG_LAVENDER_BG },
+  tagPurpleText: { fontSize: 11, color: TAG_LAVENDER, fontWeight: '600' },
+  tagBlue: { backgroundColor: TAG_BLUE_BG },
+  tagBlueText: { fontSize: 11, color: TAG_BLUE, fontWeight: '600' },
+  tagGray: { backgroundColor: TAG_GRAY_BG },
+  tagGrayText: { fontSize: 11, color: TAG_GRAY, fontWeight: '600' },
 
   postHero: {
     width: '100%',
@@ -1319,15 +1376,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#FFF5F9',
-    borderWidth: 1,
-    borderColor: '#FFC4D6',
+    backgroundColor: TAG_PINK_BG,
     borderRadius: 50,
     paddingHorizontal: 10,
     paddingVertical: 5,
     maxWidth: 160,
   },
-  productChipText: { fontSize: 11, color: PINK, fontWeight: '600' },
+  productChipText: { fontSize: 11, color: TAG_PINK, fontWeight: '600' },
 
   postFooter: {
     flexDirection: 'row',
@@ -1340,20 +1395,22 @@ const styles = StyleSheet.create({
   footerText: { fontSize: 12, color: '#8A8A9A', fontWeight: '600' },
 
   // FAB
-  fab: {
+  fabShadow: {
     position: 'absolute',
     right: 20,
     bottom: 24,
+    borderRadius: 26,
+    shadowColor: '#B0B0B0',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  fab: {
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: PINK,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: PINK,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 6,
   },
 });

@@ -65,3 +65,17 @@ export const Radius = {
   xl: 24,
   full: 9999,
 };
+
+// Baby pink → soft lavender → baby sky blue (matches actual meve logo)
+export const MEVE_GRADIENT = {
+  colors: ['#F9C4D8', '#E8B4E8', '#C4B8E8', '#B8D4F0'] as const,
+  start: { x: 0, y: 0 },
+  end: { x: 1, y: 0 },
+};
+
+// Baby pink → baby sky blue (2-stop simplified)
+export const MEVE_GRADIENT_SIMPLE = {
+  colors: ['#F9C4D8', '#B8D4F0'] as const,
+  start: { x: 0, y: 0 },
+  end: { x: 1, y: 0 },
+};
