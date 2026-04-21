@@ -169,6 +169,7 @@ export function CommunityScreen() {
   const [posts, setPosts] = useState<PostWithMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   // ── Load profile ─────────────────────────────────────────────────────────
   const loadProfile = useCallback(async () => {
@@ -389,10 +390,29 @@ export function CommunityScreen() {
     }
   }, [profile, profileLoaded]);
 
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setUnreadCount(0);
+        return;
+      }
+      const { count } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('is_read', false);
+      setUnreadCount(count ?? 0);
+    } catch {
+      setUnreadCount(0);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       loadProfile();
-    }, [loadProfile])
+      fetchUnreadCount();
+    }, [loadProfile, fetchUnreadCount])
   );
 
   useEffect(() => {
@@ -675,6 +695,21 @@ export function CommunityScreen() {
       <View style={styles.headerRow}>
         <Text style={styles.title}>eve</Text>
         <View style={styles.headerIcons}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Notifications')}
+            style={styles.bellBtn}
+            hitSlop={6}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="notifications-outline" size={24} color="#1A1A2E" />
+            {unreadCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
           <TouchableOpacity
             style={styles.iconBtnWrap}
             onPress={() => navigation.navigate('GlamSyncList')}
@@ -1138,6 +1173,29 @@ const styles = StyleSheet.create({
   },
   title: { flex: 1, fontSize: 18, fontWeight: '800', color: '#1A1A2E' },
   headerIcons: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  bellBtn: {
+    position: 'relative',
+    marginRight: 8,
+    paddingTop: 4,
+    paddingRight: 2,
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#FF6B9D',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
   iconBtnWrap: { alignItems: 'center', gap: 2 },
   iconBtn: {
     width: 44,

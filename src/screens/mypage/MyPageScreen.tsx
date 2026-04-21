@@ -263,7 +263,10 @@ export function MyPageScreen() {
                   <View style={styles.scanRowLeft}>
                     <Text style={styles.scanDate}>{formatDate(row.created_at)}</Text>
                     <Text style={styles.scanCondition} numberOfLines={1}>
-                      {row.scan_result.skinCondition}
+                      {row.scan_result.skinType ??
+                        row.scan_result.skinCondition ??
+                        row.scan_result.summary ??
+                        '피부 분석 결과'}
                     </Text>
                   </View>
                   <View style={styles.scanRowRight}>

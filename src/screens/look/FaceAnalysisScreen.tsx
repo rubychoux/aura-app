@@ -16,6 +16,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Svg, { Path, Ellipse } from 'react-native-svg';
 import { MainStackParamList, FaceAnalysisResult } from '../../types';
+import { cleanJson } from '../../utils/openai';
 import { SkinScanGuideModal } from '../../components/SkinScanGuideModal';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
@@ -23,26 +24,36 @@ type Nav = NativeStackNavigationProp<MainStackParamList>;
 const SKIP_KEY = 'meve_skip_face_analysis_guide';
 const ACCENT = '#FF6B9D';
 
-const ANALYSIS_PROMPT = `Analyze this face photo and return ONLY a JSON object with this exact structure:
+const ANALYSIS_PROMPT = `You are a Korean beauty expert and professional makeup artist specializing in Asian facial features and Korean beauty standards (한국 뷰티 기준).
+Analyze this facial photo with precision. Study the actual bone structure, proportions, and features visible in the photo.
+CRITICAL RULES:
+* Korean beauty standards and terminology apply
+* Analyze based on VISIBLE features only
+* Eye shape analysis must account for Asian eyelid types
+* Personal color: analyze skin undertone from the photo (warmth/coolness of skin shadows)
+* Be definitive — choose the BEST matching option
+* Personal color values MUST be exactly one of: 봄 웜톤, 여름 쿨톤, 가을 웜톤, 겨울 쿨톤
+Return ONLY valid JSON (no markdown code blocks, no other text):
 {
-  "faceShape": "계란형 | 둥근형 | 각진형 | 하트형 | 긴형",
-  "personalColor": "봄 웜톤 | 여름 쿨톤 | 가을 웜톤 | 겨울 쿨톤",
-  "undertone": "쿨톤 | 웜톤 | 뉴트럴",
-  "eyeShape": "쌍꺼풀 | 무쌍 | 속쌍",
-  "eyeTail": "올라간 눈꼬리 | 내려간 눈꼬리 | 수평",
-  "lipFullness": "얇은 편 | 보통 | 도톰한 편",
-  "skinTone": "밝은 | 중간 | 어두운",
+  "faceShape": "계란형 or 둥근형 or 각진형 or 하트형 or 긴형 or 역삼각형",
+  "faceShapeReason": "1 sentence in Korean explaining the bone structure clues",
+  "personalColor": "봄 웜톤 or 여름 쿨톤 or 가을 웜톤 or 겨울 쿨톤",
+  "personalColorReason": "1 sentence in Korean explaining the undertone clues",
+  "undertone": "쿨톤 or 웜톤 or 뉴트럴",
+  "eyeShape": "쌍꺼풀 or 무쌍 or 인라인 쌍커풀 or 인아웃라인 쌍커풀 or 아웃라인 쌍커풀",
+  "eyeTail": "올라간 눈꼬리 or 내려간 눈꼬리 or 수평",
+  "lipFullness": "얇은 편 or 보통 or 도톰한 편",
+  "skinTone": "매우밝음 or 밝음 or 중간 or 어두운편",
   "makeupRecommendation": {
-    "foundation": "추천 파운데이션 톤과 이유 (2-3줄)",
-    "lip": "추천 립 컬러 계열과 이유 (2-3줄)",
-    "eye": "추천 아이 메이크업 스타일과 이유 (2-3줄)",
-    "blush": "추천 블러셔 위치와 컬러 (2-3줄)"
+    "foundation": "specific foundation advice 2-3 sentences Korean 해요체",
+    "eye": "eye makeup style for their eye shape 2-3 sentences Korean 해요체",
+    "lip": "lip color family for their personal color 2-3 sentences Korean 해요체",
+    "blush": "blush placement and color for their face shape 2-3 sentences Korean 해요체"
   },
   "colorPalette": ["#hex1", "#hex2", "#hex3", "#hex4", "#hex5"],
   "avoidColors": ["#hex1", "#hex2", "#hex3"],
-  "summary": "전체 분석 요약 (3-4줄, 따뜻하고 친근한 해요체)"
-}
-Return ONLY the JSON. No other text.`;
+  "summary": "4-5 lines warm encouraging specific summary in Korean 해요체, referencing specific features observed"
+}`;
 
 const CHECKS = [
   { emoji: '💆', text: '맨얼굴 또는 가벼운 메이크업 상태인가요?' },
@@ -79,10 +90,8 @@ async function runFaceAnalysis(base64: string): Promise<FaceAnalysisResult> {
   if (!response.ok) {
     throw new Error(data.error?.message ?? `OpenAI ${response.status}`);
   }
-  const content = data.choices[0].message.content.trim();
-  const match = content.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('JSON을 찾을 수 없어요.');
-  return JSON.parse(match[0]) as FaceAnalysisResult;
+  const content = data.choices[0].message.content;
+  return JSON.parse(cleanJson(content)) as FaceAnalysisResult;
 }
 
 export function FaceAnalysisScreen() {

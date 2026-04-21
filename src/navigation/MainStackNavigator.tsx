@@ -22,6 +22,8 @@ import { LookPollCreateScreen } from '../screens/community/LookPollCreateScreen'
 import { LookPollDetailScreen } from '../screens/community/LookPollDetailScreen';
 import { CreatePostScreen } from '../screens/community/CreatePostScreen';
 import { PostDetailScreen } from '../screens/community/PostDetailScreen';
+import { RoutineCoachChatScreen } from '../screens/skincare/RoutineCoachChatScreen';
+import { NotificationScreen } from '../screens/community/NotificationScreen';
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
@@ -53,6 +55,8 @@ export function MainStackNavigator() {
       <Stack.Screen name="LookPollDetail" component={LookPollDetailScreen} />
       <Stack.Screen name="CreatePost" component={CreatePostScreen} />
       <Stack.Screen name="PostDetail" component={PostDetailScreen} />
+      <Stack.Screen name="RoutineCoachChat" component={RoutineCoachChatScreen} />
+      <Stack.Screen name="Notifications" component={NotificationScreen} />
     </Stack.Navigator>
   );
 }
