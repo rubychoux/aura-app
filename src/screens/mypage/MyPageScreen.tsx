@@ -2,11 +2,14 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
   Alert,
 } from 'react-native';
+
+const logo = require('../../../assets/images/meve-logo.png');
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -152,6 +155,10 @@ export function MyPageScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        <View style={styles.screenHeader}>
+          <Image source={logo} style={styles.headerLogo} />
+        </View>
+
         {/* ── 1. PROFILE HEADER ──────────────────────────────────────────── */}
         <View style={styles.profileHeader}>
           <View style={styles.avatar}>
@@ -303,6 +310,20 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FDF6F9' },
   scroll: { flex: 1 },
   content: { paddingBottom: 20 },
+
+  screenHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  headerLogo: {
+    width: 170,
+    height: 68,
+    resizeMode: 'contain',
+    alignSelf: 'flex-start',
+    marginLeft: -40,
+    marginBottom: -8,
+  },
 
   // Profile header
   profileHeader: {

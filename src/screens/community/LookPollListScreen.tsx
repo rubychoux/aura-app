@@ -119,17 +119,14 @@ export function LookPollListScreen() {
     }
     setJoining(true);
     try {
-      const { data: poll, error } = await supabase
-        .from('look_polls')
-        .select('id, expires_at')
-        .eq('invite_code', trimmed)
-        .maybeSingle();
+      const { data, error } = await supabase.rpc('get_poll_by_invite', { code: trimmed });
       if (error) throw error;
-      if (!poll) {
+      const poll = Array.isArray(data) ? data[0] : data;
+      if (!poll || !poll.id) {
         Alert.alert('찾을 수 없음', '해당 코드의 투표를 찾을 수 없어요.');
         return;
       }
-      if (new Date(poll.expires_at).getTime() <= Date.now()) {
+      if (poll.expires_at && new Date(poll.expires_at).getTime() <= Date.now()) {
         Alert.alert('투표 종료', '이미 종료된 투표예요.');
         return;
       }

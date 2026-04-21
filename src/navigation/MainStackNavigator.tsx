@@ -20,6 +20,8 @@ import { GlamSyncDetailScreen } from '../screens/community/GlamSyncDetailScreen'
 import { LookPollListScreen } from '../screens/community/LookPollListScreen';
 import { LookPollCreateScreen } from '../screens/community/LookPollCreateScreen';
 import { LookPollDetailScreen } from '../screens/community/LookPollDetailScreen';
+import { CreatePostScreen } from '../screens/community/CreatePostScreen';
+import { PostDetailScreen } from '../screens/community/PostDetailScreen';
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
@@ -49,6 +51,8 @@ export function MainStackNavigator() {
       <Stack.Screen name="LookPollList" component={LookPollListScreen} />
       <Stack.Screen name="LookPollCreate" component={LookPollCreateScreen} />
       <Stack.Screen name="LookPollDetail" component={LookPollDetailScreen} />
+      <Stack.Screen name="CreatePost" component={CreatePostScreen} />
+      <Stack.Screen name="PostDetail" component={PostDetailScreen} />
     </Stack.Navigator>
   );
 }

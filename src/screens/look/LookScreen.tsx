@@ -1,19 +1,22 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   SafeAreaView,
   StatusBar,
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
+
+const logo = require('../../../assets/images/meve-logo.png');
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
-import { MainStackParamList } from '../../types';
+import { MainStackParamList, FaceAnalysisResult } from '../../types';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
@@ -68,6 +71,7 @@ const AESTHETICS: Aesthetic[] = [
 export function LookScreen() {
   const navigation = useNavigation<Nav>();
   const [selected, setSelected] = useState<AestheticKey | null>(null);
+  const [savedFaceAnalysis, setSavedFaceAnalysis] = useState<FaceAnalysisResult | null>(null);
 
   const selectedAesthetic = AESTHETICS.find((a) => a.key === selected);
 
@@ -82,6 +86,22 @@ export function LookScreen() {
       } catch {}
     })();
   }, []);
+
+  const loadSavedFaceAnalysis = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem('meve_face_analysis');
+      if (raw) setSavedFaceAnalysis(JSON.parse(raw) as FaceAnalysisResult);
+      else setSavedFaceAnalysis(null);
+    } catch {
+      setSavedFaceAnalysis(null);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadSavedFaceAnalysis();
+    }, [loadSavedFaceAnalysis])
+  );
 
   const handleSelect = async (key: AestheticKey) => {
     const isDeselect = selected === key;
@@ -107,7 +127,7 @@ export function LookScreen() {
       >
         {/* 헤더 */}
         <View style={styles.header}>
-          <Text style={styles.wordmark}>meve</Text>
+          <Image source={logo} style={styles.headerLogo} />
         </View>
 
         {/* 타이틀 */}
@@ -170,13 +190,36 @@ export function LookScreen() {
               <Ionicons name="scan-outline" size={28} color={Colors.accent} />
             </View>
             <View style={styles.comingSoonBody}>
-              <Text style={styles.comingSoonTitle}>AI 얼굴 분석</Text>
+              <Text style={styles.comingSoonTitle}>
+                AI 얼굴 분석{savedFaceAnalysis ? ' 다시 하기' : ''}
+              </Text>
               <Text style={styles.comingSoonDesc}>
                 얼굴형과 피부톤을 분석해 어울리는 룩을 추천해드려요
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
           </TouchableOpacity>
+
+          {savedFaceAnalysis && (
+            <TouchableOpacity
+              style={[styles.comingSoonCard, styles.savedResultCard]}
+              onPress={() =>
+                navigation.navigate('FaceAnalysisResult', { result: savedFaceAnalysis })
+              }
+              activeOpacity={0.85}
+            >
+              <View style={[styles.comingSoonIconWrap, styles.savedResultIconWrap]}>
+                <Ionicons name="sparkles" size={24} color="#fff" />
+              </View>
+              <View style={styles.comingSoonBody}>
+                <Text style={styles.comingSoonTitle}>저장된 분석 결과 보기</Text>
+                <Text style={styles.comingSoonDesc}>
+                  {savedFaceAnalysis.personalColor} · {savedFaceAnalysis.faceShape}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={styles.comingSoonCard}
@@ -229,6 +272,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: Colors.accent,
     letterSpacing: 4,
+  },
+  headerLogo: {
+    width: 170,
+    height: 68,
+    resizeMode: 'contain',
+    alignSelf: 'flex-start',
+    marginLeft: -40,
+    marginBottom: -8,
   },
 
   titleSection: {
@@ -316,6 +367,13 @@ const styles = StyleSheet.create({
   comingSoonBody: { flex: 1, gap: 4 },
   comingSoonTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
   comingSoonDesc: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18 },
+  savedResultCard: {
+    backgroundColor: '#FFF5F9',
+    borderColor: '#FFC4D6',
+  },
+  savedResultIconWrap: {
+    backgroundColor: '#FF6B9D',
+  },
   comingSoonBadge: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
   comingSoonBadgeText: { fontSize: 12, color: Colors.accent, fontWeight: '500' },
 

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   ScrollView,
   StyleSheet,
   StatusBar,
@@ -11,6 +12,8 @@ import {
   Platform,
   UIManager,
 } from 'react-native';
+
+const logo = require('../../../assets/images/meve-logo.png');
 
 if (
   Platform.OS === 'android' &&
@@ -371,6 +374,7 @@ export function HomeScreen() {
         {/* ── COMPACT HEADER ───────────────────────────────────────────── */}
         <View style={styles.compactHeader}>
           <View style={styles.compactHeaderMain}>
+            <Image source={logo} style={styles.headerLogo} />
             <Text style={styles.compactSubtitle}>오늘도 빛나는 하루예요 ✨</Text>
             <Text style={styles.compactName}>
               {displayName ?? '회원'}님
@@ -784,13 +788,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingTop: 4,
     paddingBottom: 18,
     gap: 10,
   },
   compactHeaderMain: {
     flex: 1,
     gap: 2,
+    alignItems: 'flex-start'
+  },
+  headerLogo: {
+    width: 170,
+    height: 68,
+    resizeMode: 'contain',
+    alignSelf: 'flex-start',
+    marginLeft: -40,
+    marginBottom: -8,
   },
   compactSubtitle: {
     fontSize: 12,

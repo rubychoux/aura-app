@@ -178,7 +178,58 @@ export type MainStackParamList = {
   LookPollList: undefined;
   LookPollCreate: undefined;
   LookPollDetail: { pollId: string };
+  CreatePost: undefined;
+  PostDetail: { postId: string };
 };
+
+export type PostType = 'normal' | 'question' | 'before_after';
+
+export interface ProductTag {
+  name: string;
+  oliveyoung_url: string;
+}
+
+export interface Post {
+  id: string;
+  user_id: string;
+  display_name: string | null;
+  content: string;
+  image_url: string | null;
+  image_urls: string[];
+  before_photo_url: string | null;
+  after_photo_url: string | null;
+  post_type: PostType;
+  is_public: boolean;
+  event_type: string | null;
+  skin_type: string | null;
+  personal_color: string | null;
+  vibe: string | null;
+  face_shape: string | null;
+  dday_count: number | null;
+  product_tags: ProductTag[];
+  likes_count: number;
+  comments_count: number;
+  created_at: string;
+  user_profiles?: { display_name: string | null; avatar_url: string | null } | null;
+}
+
+export interface PostComment {
+  id: string;
+  post_id: string;
+  user_id: string;
+  display_name: string | null;
+  content: string;
+  is_ai: boolean;
+  created_at: string;
+  user_profiles?: { display_name: string | null; avatar_url: string | null } | null;
+}
+
+export interface PostLike {
+  id: string;
+  post_id: string;
+  user_id: string;
+  created_at: string;
+}
 
 export interface GlamSync {
   id: string;
