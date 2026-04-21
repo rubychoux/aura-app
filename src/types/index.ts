@@ -180,7 +180,24 @@ export type MainStackParamList = {
   LookPollDetail: { pollId: string };
   CreatePost: undefined;
   PostDetail: { postId: string };
+  RoutineCoachChat: undefined;
+  Notifications: undefined;
 };
+
+export type NotificationType = 'comment' | 'reply' | 'like';
+
+export interface PostNotification {
+  id: string;
+  user_id: string;
+  type: NotificationType;
+  actor_id: string | null;
+  post_id: string | null;
+  comment_id: string | null;
+  is_read: boolean;
+  created_at: string;
+  actor?: { display_name: string | null; avatar_url: string | null } | null;
+  post?: { content: string | null; image_urls: string[] | null } | null;
+}
 
 export type PostType = 'normal' | 'question' | 'before_after';
 
@@ -220,6 +237,7 @@ export interface PostComment {
   display_name: string | null;
   content: string;
   is_ai: boolean;
+  parent_id: string | null;
   created_at: string;
   user_profiles?: { display_name: string | null; avatar_url: string | null } | null;
 }
@@ -301,7 +319,9 @@ export interface InspoLookResult {
 
 export interface FaceAnalysisResult {
   faceShape: string;
+  faceShapeReason?: string;
   personalColor: string;
+  personalColorReason?: string;
   undertone: string;
   eyeShape: string;
   eyeTail: string;
@@ -347,20 +367,40 @@ export type ScanStackParamList = {
   ScanHistory: undefined;
 };
 
+export interface SkinZone {
+  status: string;
+  score: number;
+}
+
 export interface ScanAnalysisResult {
   overallScore: number;
-  skinCondition: string;
-  acneType: string;
-  severity: number;
+  // New schema (2026 prompt)
+  skinType?: string;
+  hydrationLevel?: string;
   zones: {
-    forehead: number;
-    leftCheek: number;
-    rightCheek: number;
-    nose: number;
-    chin: number;
+    forehead: SkinZone | number;
+    leftCheek: SkinZone | number;
+    rightCheek: SkinZone | number;
+    nose: SkinZone | number;
+    chin: SkinZone | number;
   };
-  keyFindings: string[];
-  recommendations: string[];
+  concerns?: string[];
+  strengths?: string[];
+  ingredients?: {
+    recommended: string[];
+    avoid: string[];
+  };
+  routineAdvice?: {
+    morning: string;
+    evening: string;
+  };
+  summary?: string;
+  // Legacy fields kept optional so rows saved under the old schema still type-check.
+  skinCondition?: string;
+  acneType?: string;
+  severity?: number;
+  keyFindings?: string[];
+  recommendations?: string[];
   redness?: {
     detected: boolean;
     zones: string[];

@@ -1,5 +1,5 @@
-// Post detail with comments + AI coach (question posts) — MEVE-193.
-import React, { useCallback, useEffect, useState } from 'react';
+// Post detail with comments + replies + AI coach — MEVE-193 / MEVE-198.
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -61,6 +61,13 @@ export function PostDetailScreen() {
 
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<{
+    commentId: string;
+    displayName: string;
+    userId: string;
+  } | null>(null);
+  const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set());
+  const inputRef = useRef<TextInput>(null);
 
   const [askingAI, setAskingAI] = useState(false);
 
@@ -148,6 +155,17 @@ export function PostDetailScreen() {
           .from('likes')
           .insert({ post_id: postId, user_id: currentUserId });
         if (error) throw error;
+        // Notify post owner (don't notify self-likes)
+        if (post && post.user_id !== currentUserId) {
+          try {
+            await supabase.from('notifications').insert({
+              user_id: post.user_id,
+              type: 'like',
+              actor_id: currentUserId,
+              post_id: postId,
+            });
+          } catch {}
+        }
       } else {
         const { error } = await supabase
           .from('likes')
@@ -178,21 +196,90 @@ export function PostDetailScreen() {
         .select('display_name')
         .eq('id', currentUserId)
         .single();
-      const { error } = await supabase.from('comments').insert({
-        post_id: postId,
-        user_id: currentUserId,
-        display_name: profile?.display_name ?? null,
-        content: text,
-        is_ai: false,
-      });
+      const parentId = replyingTo?.commentId ?? null;
+      const parentUserId = replyingTo?.userId ?? null;
+      const { data: inserted, error } = await supabase
+        .from('comments')
+        .insert({
+          post_id: postId,
+          user_id: currentUserId,
+          display_name: profile?.display_name ?? null,
+          content: text,
+          is_ai: false,
+          parent_id: parentId,
+        })
+        .select()
+        .single();
       if (error) throw error;
+
+      // Notifications — best-effort, don't block on failure
+      try {
+        const newCommentId = inserted?.id ?? null;
+        const notifRows: Array<{
+          user_id: string;
+          type: 'comment' | 'reply';
+          actor_id: string;
+          post_id: string;
+          comment_id: string | null;
+        }> = [];
+        if (post && post.user_id !== currentUserId) {
+          notifRows.push({
+            user_id: post.user_id,
+            type: parentId ? 'reply' : 'comment',
+            actor_id: currentUserId,
+            post_id: postId,
+            comment_id: newCommentId,
+          });
+        }
+        if (parentId && parentUserId && parentUserId !== currentUserId) {
+          notifRows.push({
+            user_id: parentUserId,
+            type: 'reply',
+            actor_id: currentUserId,
+            post_id: postId,
+            comment_id: newCommentId,
+          });
+        }
+        if (notifRows.length > 0) {
+          await supabase.from('notifications').insert(notifRows);
+        }
+      } catch {}
+
       setCommentText('');
+      if (parentId) {
+        setExpandedReplies((prev) => {
+          const next = new Set(prev);
+          next.add(parentId);
+          return next;
+        });
+      }
+      setReplyingTo(null);
       await fetchAll();
     } catch (e: any) {
       Alert.alert('댓글 작성 실패', e?.message ?? '다시 시도해 주세요.');
     } finally {
       setSubmittingComment(false);
     }
+  };
+
+  const startReply = (c: PostComment, displayName: string) => {
+    setReplyingTo({ commentId: c.id, displayName, userId: c.user_id });
+    setCommentText(`@${displayName} `);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const cancelReply = () => {
+    setReplyingTo(null);
+    setCommentText('');
+  };
+
+  const toggleReplies = (commentId: string) => {
+    setExpandedReplies((prev) => {
+      const next = new Set(prev);
+      if (next.has(commentId)) next.delete(commentId);
+      else next.add(commentId);
+      return next;
+    });
   };
 
   const deleteComment = (c: PostComment) => {
@@ -300,6 +387,21 @@ export function PostDetailScreen() {
   const initial = displayName?.[0] ?? '?';
   const hasAIComment = comments.some((c) => c.is_ai);
   const showAICoachPanel = post.post_type === 'question' && !hasAIComment;
+
+  // Separate top-level + replies, group replies by parent
+  const { topLevel, repliesByParent } = (() => {
+    const top: PostComment[] = [];
+    const byParent: Record<string, PostComment[]> = {};
+    for (const c of comments) {
+      if (!c.parent_id) {
+        top.push(c);
+      } else {
+        if (!byParent[c.parent_id]) byParent[c.parent_id] = [];
+        byParent[c.parent_id].push(c);
+      }
+    }
+    return { topLevel: top, repliesByParent: byParent };
+  })();
 
   const openProduct = (url: string) => {
     if (!url) return;
@@ -457,73 +559,170 @@ export function PostDetailScreen() {
 
           {/* Comments */}
           <Text style={styles.commentsLabel}>댓글 {comments.length}</Text>
-          {comments.length === 0 && (
-            <Text style={styles.commentsEmpty}>
-              첫 댓글을 남겨보세요 ✨
-            </Text>
+          {topLevel.length === 0 && (
+            <Text style={styles.commentsEmpty}>첫 댓글을 남겨보세요 ✨</Text>
           )}
-          {comments.map((c) => {
+          {topLevel.map((c) => {
             const isOwn = c.user_id === currentUserId;
             const name =
               c.user_profiles?.display_name ?? c.display_name ?? (c.is_ai ? 'AI 코치' : '익명');
             const avatar = c.user_profiles?.avatar_url ?? null;
+            const replies = repliesByParent[c.id] ?? [];
+            const isExpanded = expandedReplies.has(c.id);
             return (
-              <TouchableOpacity
-                key={c.id}
-                style={[styles.comment, c.is_ai && styles.commentAI]}
-                activeOpacity={0.85}
-                onLongPress={isOwn ? () => deleteComment(c) : undefined}
-              >
-                {c.is_ai ? (
-                  <View style={[styles.avatar, styles.aiAvatar]}>
-                    <Ionicons name="sparkles" size={14} color="#fff" />
+              <View key={c.id} style={c.is_ai ? styles.commentAI : undefined}>
+                <TouchableOpacity
+                  style={styles.comment}
+                  activeOpacity={0.85}
+                  onLongPress={isOwn ? () => deleteComment(c) : undefined}
+                >
+                  {c.is_ai ? (
+                    <View style={[styles.avatar, styles.aiAvatar]}>
+                      <Ionicons name="sparkles" size={14} color="#fff" />
+                    </View>
+                  ) : avatar ? (
+                    <Image source={{ uri: avatar }} style={styles.avatar} />
+                  ) : (
+                    <View style={[styles.avatar, styles.avatarFallback]}>
+                      <Text style={styles.avatarInitial}>{name[0]}</Text>
+                    </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.commentMeta}>
+                      <Text style={[styles.commentName, c.is_ai && { color: BLUE }]}>
+                        {name}
+                      </Text>
+                      <Text style={styles.commentTime}>{timeAgo(c.created_at)}</Text>
+                    </View>
+                    <Text style={styles.commentText}>{c.content}</Text>
+                    {!c.is_ai && (
+                      <TouchableOpacity
+                        onPress={() => startReply(c, name)}
+                        hitSlop={6}
+                        style={styles.replyBtnWrap}
+                      >
+                        <Text style={styles.replyBtnBelow}>↩ 답글</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
-                ) : avatar ? (
-                  <Image source={{ uri: avatar }} style={styles.avatar} />
-                ) : (
-                  <View style={[styles.avatar, styles.avatarFallback]}>
-                    <Text style={styles.avatarInitial}>{name[0]}</Text>
+                </TouchableOpacity>
+
+                {replies.length > 0 && (
+                  <View style={styles.repliesWrap}>
+                    <TouchableOpacity
+                      style={styles.toggleReplies}
+                      onPress={() => toggleReplies(c.id)}
+                      hitSlop={6}
+                    >
+                      <Text style={styles.toggleRepliesText}>
+                        {replies.length}개 답글
+                      </Text>
+                      <Ionicons
+                        name="chevron-down-outline"
+                        size={12}
+                        color={BLUE}
+                        style={{
+                          transform: [{ rotate: isExpanded ? '180deg' : '0deg' }],
+                        }}
+                      />
+                    </TouchableOpacity>
+                    {isExpanded &&
+                      replies.map((r) => {
+                        const replyIsOwn = r.user_id === currentUserId;
+                        const replyName =
+                          r.user_profiles?.display_name ?? r.display_name ?? '익명';
+                        const replyAvatar = r.user_profiles?.avatar_url ?? null;
+                        // Detect leading @mention for styling
+                        const mentionMatch = r.content.match(/^@(\S+)\s*/);
+                        const mentionText = mentionMatch ? mentionMatch[0] : null;
+                        const rest = mentionText ? r.content.slice(mentionText.length) : r.content;
+                        return (
+                          <TouchableOpacity
+                            key={r.id}
+                            style={styles.replyItem}
+                            activeOpacity={0.85}
+                            onLongPress={replyIsOwn ? () => deleteComment(r) : undefined}
+                          >
+                            {replyAvatar ? (
+                              <Image source={{ uri: replyAvatar }} style={styles.replyAvatar} />
+                            ) : (
+                              <View style={[styles.replyAvatar, styles.avatarFallback]}>
+                                <Text style={styles.replyAvatarInitial}>
+                                  {replyName[0]}
+                                </Text>
+                              </View>
+                            )}
+                            <View style={{ flex: 1 }}>
+                              <View style={styles.commentMeta}>
+                                <Text style={styles.replyName}>{replyName}</Text>
+                                <Text style={styles.commentTime}>
+                                  {timeAgo(r.created_at)}
+                                </Text>
+                              </View>
+                              <Text style={styles.commentText}>
+                                {mentionText && (
+                                  <Text style={styles.mention}>{mentionText}</Text>
+                                )}
+                                {rest}
+                              </Text>
+                              <TouchableOpacity
+                                onPress={() => startReply(c, replyName)}
+                                hitSlop={6}
+                                style={styles.replyBtnWrap}
+                              >
+                                <Text style={styles.replyBtnBelow}>↩ 답글</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
                   </View>
                 )}
-                <View style={{ flex: 1 }}>
-                  <View style={styles.commentMeta}>
-                    <Text style={[styles.commentName, c.is_ai && { color: BLUE }]}>
-                      {name}
-                    </Text>
-                    <Text style={styles.commentTime}>{timeAgo(c.created_at)}</Text>
-                  </View>
-                  <Text style={styles.commentText}>{c.content}</Text>
-                </View>
-              </TouchableOpacity>
+              </View>
             );
           })}
         </ScrollView>
 
         {/* Comment input bar (fixed bottom) */}
-        <SafeAreaView edges={['bottom']} style={styles.inputBar}>
-          <TextInput
-            style={styles.commentInput}
-            value={commentText}
-            onChangeText={setCommentText}
-            placeholder="댓글을 남겨보세요"
-            placeholderTextColor="#B8AFB5"
-            multiline
-            maxLength={500}
-          />
-          <TouchableOpacity
-            style={[
-              styles.sendBtn,
-              (!commentText.trim() || submittingComment) && { opacity: 0.5 },
-            ]}
-            onPress={postComment}
-            disabled={!commentText.trim() || submittingComment}
-          >
-            {submittingComment ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Ionicons name="send" size={18} color="#fff" />
-            )}
-          </TouchableOpacity>
+        <SafeAreaView edges={['bottom']} style={styles.inputWrap}>
+          {replyingTo && (
+            <View style={styles.replyBanner}>
+              <Text style={styles.replyBannerText}>
+                @{replyingTo.displayName}에게 답글 달기
+              </Text>
+              <TouchableOpacity onPress={cancelReply} hitSlop={6}>
+                <Text style={styles.replyBannerCancel}>취소</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          <View style={styles.inputBar}>
+            <TextInput
+              ref={inputRef}
+              style={styles.commentInput}
+              value={commentText}
+              onChangeText={setCommentText}
+              placeholder={
+                replyingTo ? '답글을 남겨보세요' : '댓글을 남겨보세요'
+              }
+              placeholderTextColor="#B8AFB5"
+              multiline
+              maxLength={500}
+            />
+            <TouchableOpacity
+              style={[
+                styles.sendBtn,
+                (!commentText.trim() || submittingComment) && { opacity: 0.5 },
+              ]}
+              onPress={postComment}
+              disabled={!commentText.trim() || submittingComment}
+            >
+              {submittingComment ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Ionicons name="send" size={18} color="#fff" />
+              )}
+            </TouchableOpacity>
+          </View>
         </SafeAreaView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -680,15 +879,91 @@ const styles = StyleSheet.create({
   commentTime: { fontSize: 10, color: '#8A8A9A' },
   commentText: { fontSize: 13, color: '#1A1A2E', lineHeight: 19 },
 
+  // Reply button + replies toggle
+  replyBtnWrap: {
+    marginTop: 4,
+    alignSelf: 'flex-start',
+  },
+  replyBtnBelow: {
+    fontSize: 12,
+    color: '#8A8A9A',
+    fontWeight: '500',
+  },
+  repliesWrap: {
+    paddingLeft: 56,
+    paddingRight: 20,
+    paddingBottom: 6,
+  },
+  toggleReplies: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+  },
+  toggleRepliesText: {
+    fontSize: 12,
+    color: BLUE,
+    fontWeight: '600',
+  },
+  replyItem: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 8,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: '#E8F4FD',
+  },
+  replyAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#F0E6EC',
+  },
+  replyAvatarInitial: {
+    color: '#8A8A9A',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  replyName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1A1A2E',
+  },
+  mention: {
+    color: BLUE,
+    fontWeight: '600',
+  },
+
   // Input bar
+  inputWrap: {
+    borderTopWidth: 1,
+    borderTopColor: '#EFE8ED',
+    backgroundColor: '#fff',
+  },
+  replyBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#E8F4FD',
+  },
+  replyBannerText: {
+    fontSize: 12,
+    color: BLUE,
+    fontWeight: '600',
+  },
+  replyBannerCancel: {
+    fontSize: 12,
+    color: BLUE,
+    fontWeight: '700',
+  },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#EFE8ED',
     backgroundColor: '#fff',
   },
   commentInput: {

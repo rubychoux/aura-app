@@ -9,22 +9,35 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  LayoutAnimation,
+  Platform,
+  UIManager,
 } from 'react-native';
+
+if (
+  Platform.OS === 'android' &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const logo = require('../../../assets/images/meve-logo.png');
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { CompositeNavigationProp, useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Colors, Spacing, Radius } from '../../constants/theme';
 import { supabase } from '../../services/supabase';
-import { AIScanStackParamList, ScanAnalysisResult } from '../../types';
-import { HARDCODED_ROUTINE } from '../../constants/routine';
+import { AIScanStackParamList, MainStackParamList, ScanAnalysisResult } from '../../types';
 import { loadRoutineCheckin, RoutineCheckin } from '../../utils/routineCheckin';
+import { cleanJson } from '../../utils/openai';
 
-type Nav = NativeStackNavigationProp<AIScanStackParamList, 'SkinHome'>;
+type Nav = CompositeNavigationProp<
+  NativeStackNavigationProp<AIScanStackParamList, 'SkinHome'>,
+  NativeStackNavigationProp<MainStackParamList>
+>;
 
 // ─── Event config (inline) ───────────────────────────────────────────────────
 
@@ -62,16 +75,16 @@ interface IngredientResult {
 interface GeneratedRoutineStep {
   step: number;
   category: string;
-  ingredient: string;
+  product: string;
+  instruction: string;
   tip: string;
+  oliveyoungQuery: string;
 }
 
 interface GeneratedRoutine {
+  eventFocus: string;
   am: GeneratedRoutineStep[];
   pm: GeneratedRoutineStep[];
-  generatedAt?: string;
-  eventType?: string;
-  summary?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -87,11 +100,33 @@ export function SkincareScreen() {
   // Ingredient analysis
   const [ingredientResult, setIngredientResult] = useState<IngredientResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [recommendedExpanded, setRecommendedExpanded] = useState(false);
+  const [avoidExpanded, setAvoidExpanded] = useState(false);
+  const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
 
-  // Routine (check-in state for today; steps from HARDCODED_ROUTINE until Sprint 3)
+  const toggleRecommended = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setRecommendedExpanded((prev) => !prev);
+  };
+  const toggleAvoid = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setAvoidExpanded((prev) => !prev);
+  };
+  const toggleStep = (stepNum: number) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedSteps((prev) => {
+      const next = new Set(prev);
+      if (next.has(stepNum)) next.delete(stepNum);
+      else next.add(stepNum);
+      return next;
+    });
+  };
+
+  // Routine (check-in + AI-generated routine)
   const [routineCheckin, setRoutineCheckin] = useState<RoutineCheckin>({ am: false, pm: false });
   const [routineTab, setRoutineTab] = useState<'am' | 'pm'>('am');
   const [generatedRoutine, setGeneratedRoutine] = useState<GeneratedRoutine | null>(null);
+  const [generatingRoutine, setGeneratingRoutine] = useState(false);
 
   const daysLeft = eventDate
     ? Math.ceil((new Date(eventDate).getTime() - Date.now()) / 86_400_000)
@@ -163,6 +198,96 @@ export function SkincareScreen() {
       if (raw) setGeneratedRoutine(JSON.parse(raw));
       else setGeneratedRoutine(null);
     } catch {}
+  };
+
+  const generateRoutine = async () => {
+    if (generatingRoutine) return;
+    setGeneratingRoutine(true);
+    try {
+      const [
+        [, scanRaw],
+        [, storedEventType],
+        [, ddayDate],
+      ] = await AsyncStorage.multiGet([
+        'meve_last_scan_result',
+        'meve_event_type',
+        'meve_event_date',
+      ]);
+
+      const scanResult = scanRaw ? JSON.parse(scanRaw) : null;
+      const daysLeft = ddayDate
+        ? Math.max(
+            0,
+            Math.ceil((new Date(ddayDate).getTime() - Date.now()) / 86_400_000)
+          )
+        : null;
+
+      const prompt = `You are a Korean skincare expert. Create a personalized AM/PM skincare routine.
+
+User profile:
+- Skin type: ${scanResult?.skinType ?? '정보 없음'}
+- Concerns: ${scanResult?.concerns?.join(', ') ?? '정보 없음'}
+- Event: ${storedEventType ?? '없음'}
+- Days until event: ${daysLeft ?? '미설정'}
+
+Return ONLY valid JSON, no markdown:
+{
+  "eventFocus": "D-day 이벤트 기반 루틴 포커스 한 줄 (해요체)",
+  "am": [
+    {
+      "step": 1,
+      "category": "클렌징",
+      "product": "약산성 폼클렌저",
+      "instruction": "사용 방법 1-2줄 (해요체)",
+      "tip": "팁 한 줄 (해요체)",
+      "oliveyoungQuery": "올리브영 검색어"
+    }
+  ],
+  "pm": [
+    {
+      "step": 1,
+      "category": "더블클렌징",
+      "product": "클렌징 오일",
+      "instruction": "사용 방법 (해요체)",
+      "tip": "팁 (해요체)",
+      "oliveyoungQuery": "검색어"
+    }
+  ]
+}`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 1500,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message ?? `OpenAI ${response.status}`);
+      }
+      const text = data.choices[0].message.content;
+      const routine: GeneratedRoutine = JSON.parse(cleanJson(text));
+      await AsyncStorage.setItem('meve_routine', JSON.stringify(routine));
+      setGeneratedRoutine(routine);
+    } catch (e: any) {
+      Alert.alert('루틴 생성 실패', e?.message ?? '다시 시도해 주세요.');
+    } finally {
+      setGeneratingRoutine(false);
+    }
+  };
+
+  const regenerateRoutine = async () => {
+    try {
+      await AsyncStorage.removeItem('meve_routine');
+    } catch {}
+    setGeneratedRoutine(null);
+    generateRoutine();
   };
 
   // ── Ingredient analysis ─────────────────────────────────────────────────────
@@ -316,37 +441,77 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
             </View>
           ) : ingredientResult ? (
             <>
-              {/* 추천 성분 */}
-              <Text style={styles.subTitle}>
-                <Ionicons name="checkmark-circle" size={14} color={Colors.success} /> 추천 성분
-              </Text>
-              {ingredientResult.recommended.map((item, i) => (
-                <View key={i} style={[styles.ingredientCard, styles.recommendedBorder]}>
-                  <Text style={styles.ingredientName}>{item.name}</Text>
-                  <Text style={styles.ingredientBenefit}>{item.benefit}</Text>
-                  <Text style={styles.ingredientReason}>{item.reason}</Text>
-                  <TouchableOpacity
-                    onPress={() =>
-                      Linking.openURL(
-                        `https://www.oliveyoung.co.kr/store/search/getSearchMain.do?query=${encodeURIComponent(item.name)}`
-                      )
-                    }
-                  >
-                    <Text style={styles.oliveyoungLink}>올리브영에서 보기 →</Text>
-                  </TouchableOpacity>
+              {/* 추천 성분 — collapsible */}
+              <TouchableOpacity
+                style={styles.ingredientFoldHeader}
+                onPress={toggleRecommended}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.ingredientFoldTitle}>추천 성분</Text>
+                <View style={styles.ingredientFoldPill}>
+                  <Text style={styles.ingredientFoldPillText}>
+                    {ingredientResult.recommended.length}개
+                  </Text>
                 </View>
-              ))}
+                <View style={{ flex: 1 }} />
+                <Ionicons
+                  name="chevron-down-outline"
+                  size={18}
+                  color="#5BA3D9"
+                  style={{
+                    transform: [{ rotate: recommendedExpanded ? '180deg' : '0deg' }],
+                  }}
+                />
+              </TouchableOpacity>
+              {recommendedExpanded &&
+                ingredientResult.recommended.map((item, i) => (
+                  <View key={i} style={[styles.ingredientCard, styles.recommendedBorder]}>
+                    <Text style={styles.ingredientName}>{item.name}</Text>
+                    <Text style={styles.ingredientBenefit}>{item.benefit}</Text>
+                    <Text style={styles.ingredientReason}>{item.reason}</Text>
+                    <TouchableOpacity
+                      onPress={() =>
+                        Linking.openURL(
+                          `https://www.oliveyoung.co.kr/store/search/getSearchMain.do?query=${encodeURIComponent(item.name)}`
+                        )
+                      }
+                    >
+                      <Text style={styles.oliveyoungLink}>올리브영에서 보기 →</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
 
-              {/* 피해야 할 성분 */}
-              <Text style={[styles.subTitle, { marginTop: Spacing.md }]}>
-                <Ionicons name="close-circle" size={14} color={Colors.danger} /> 피해야 할 성분
-              </Text>
-              {ingredientResult.avoid.map((item, i) => (
-                <View key={i} style={[styles.ingredientCard, styles.avoidBorder]}>
-                  <Text style={styles.ingredientName}>{item.name}</Text>
-                  <Text style={styles.ingredientReason}>{item.reason}</Text>
+              {/* 피해야 할 성분 — collapsible */}
+              <TouchableOpacity
+                style={[styles.ingredientFoldHeader, styles.ingredientFoldHeaderAvoid]}
+                onPress={toggleAvoid}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.ingredientFoldTitle, { color: '#FF6B6B' }]}>
+                  피해야할 성분
+                </Text>
+                <View style={[styles.ingredientFoldPill, { backgroundColor: '#FF6B6B' }]}>
+                  <Text style={styles.ingredientFoldPillText}>
+                    {ingredientResult.avoid.length}개
+                  </Text>
                 </View>
-              ))}
+                <View style={{ flex: 1 }} />
+                <Ionicons
+                  name="chevron-down-outline"
+                  size={18}
+                  color="#FF6B6B"
+                  style={{
+                    transform: [{ rotate: avoidExpanded ? '180deg' : '0deg' }],
+                  }}
+                />
+              </TouchableOpacity>
+              {avoidExpanded &&
+                ingredientResult.avoid.map((item, i) => (
+                  <View key={i} style={[styles.ingredientCard, styles.avoidBorder]}>
+                    <Text style={styles.ingredientName}>{item.name}</Text>
+                    <Text style={styles.ingredientReason}>{item.reason}</Text>
+                  </View>
+                ))}
 
               {/* Event tip */}
               {ingredientResult.eventTip && (
@@ -363,33 +528,50 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
         <View style={styles.section}>
           <View style={styles.routineSectionHeader}>
             <Text style={styles.sectionTitle}>내 루틴</Text>
-            {!generatedRoutine && (
-              <View style={styles.samplePill}>
-                <Text style={styles.samplePillText}>샘플</Text>
-              </View>
+            <View style={{ flex: 1 }} />
+            {generatedRoutine && !generatingRoutine && (
+              <TouchableOpacity
+                style={styles.regenBtn}
+                onPress={regenerateRoutine}
+                activeOpacity={0.75}
+                hitSlop={6}
+              >
+                <Ionicons name="refresh" size={14} color="#8A8A9A" />
+                <Text style={styles.regenBtnText}>새로고침</Text>
+              </TouchableOpacity>
             )}
           </View>
-          {generatedRoutine?.summary ? (
-            <Text style={styles.routineEventLabel}>{generatedRoutine.summary}</Text>
-          ) : !generatedRoutine ? (
-            <Text style={styles.routineEventLabel}>{HARDCODED_ROUTINE.label}</Text>
-          ) : null}
 
-          {!generatedRoutine ? (
+          {generatedRoutine?.eventFocus && (
+            <View style={styles.eventFocusCard}>
+              <Text style={styles.eventFocusText}>
+                💙 {generatedRoutine.eventFocus}
+              </Text>
+            </View>
+          )}
+
+          {!generatedRoutine && !generatingRoutine ? (
             <View style={styles.generatedEmpty}>
               <Ionicons name="sparkles-outline" size={40} color={Colors.accentMuted} />
               <Text style={styles.generatedEmptyText}>
-                AI 피부 스캔 후{'\n'}맞춤 루틴이 생성돼요
+                AI가 피부 상태에 맞는{'\n'}맞춤 루틴을 만들어드려요
               </Text>
               <TouchableOpacity
-                onPress={() => navigation.navigate('FaceScanner')}
+                onPress={generateRoutine}
                 style={styles.generatedEmptyBtn}
                 activeOpacity={0.85}
               >
-                <Text style={styles.generatedEmptyBtnText}>지금 스캔하기</Text>
+                <Text style={styles.generatedEmptyBtnText}>루틴 생성하기</Text>
               </TouchableOpacity>
             </View>
-          ) : (
+          ) : generatingRoutine ? (
+            <View style={styles.generatedEmpty}>
+              <ActivityIndicator color="#5BA3D9" size="large" />
+              <Text style={styles.generatedEmptyText}>
+                맞춤 루틴을 만들고 있어요...
+              </Text>
+            </View>
+          ) : generatedRoutine ? (
             <>
               <View style={styles.generatedToggle}>
                 <TouchableOpacity
@@ -449,39 +631,89 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
                 </Text>
               </View>
 
-              {(routineTab === 'am' ? generatedRoutine.am : generatedRoutine.pm).map((step) => {
-                const accent = routineTab === 'am' ? Colors.accent : '#A8D5E8';
-                return (
-                  <View
-                    key={`${routineTab}-${step.step}`}
-                    style={[styles.generatedStepCard, { borderLeftColor: accent }]}
-                  >
-                    <View style={styles.generatedStepHeader}>
-                      <View style={[styles.generatedStepNum, { backgroundColor: accent }]}>
-                        <Text style={styles.generatedStepNumText}>{step.step}</Text>
+              <View style={styles.routineList}>
+                {(routineTab === 'am' ? generatedRoutine.am : generatedRoutine.pm).map(
+                  (step, idx, arr) => {
+                    const isExpanded = expandedSteps.has(step.step);
+                    return (
+                      <View
+                        key={`${routineTab}-${step.step}`}
+                        style={[
+                          styles.compactStep,
+                          idx < arr.length - 1 && styles.compactStepDivider,
+                        ]}
+                      >
+                        <TouchableOpacity
+                          style={styles.compactStepRow}
+                          onPress={() => toggleStep(step.step)}
+                          activeOpacity={0.75}
+                        >
+                          <View style={styles.compactStepNum}>
+                            <Text style={styles.compactStepNumText}>{step.step}</Text>
+                          </View>
+                          <Text style={styles.compactStepCategory}>{step.category}</Text>
+                          <Text
+                            style={styles.compactStepProduct}
+                            numberOfLines={1}
+                          >
+                            {step.product}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              Linking.openURL(
+                                `https://www.oliveyoung.co.kr/store/search/getSearchMain.do?query=${encodeURIComponent(
+                                  step.oliveyoungQuery || step.category
+                                )}`
+                              );
+                            }}
+                            hitSlop={6}
+                          >
+                            <Text style={styles.compactStepOlive}>올리브영 →</Text>
+                          </TouchableOpacity>
+                          <Ionicons
+                            name="chevron-down-outline"
+                            size={14}
+                            color="#8A8A9A"
+                            style={{
+                              marginLeft: 4,
+                              transform: [{ rotate: isExpanded ? '180deg' : '0deg' }],
+                            }}
+                          />
+                        </TouchableOpacity>
+                        {isExpanded && (
+                          <View style={styles.compactStepDetail}>
+                            <Text style={styles.compactStepInstruction}>
+                              {step.instruction}
+                            </Text>
+                            {step.tip ? (
+                              <Text style={styles.compactStepTip}>💡 {step.tip}</Text>
+                            ) : null}
+                          </View>
+                        )}
                       </View>
-                      <Text style={styles.generatedStepCategory}>{step.category}</Text>
-                    </View>
-                    <Text style={styles.generatedStepIngredient}>추천: {step.ingredient}</Text>
-                    <Text style={styles.generatedStepTip}>{step.tip}</Text>
-                    <TouchableOpacity
-                      onPress={() =>
-                        Linking.openURL(
-                          `https://www.oliveyoung.co.kr/store/search/getSearchMain.do?query=${encodeURIComponent(step.category)}`
-                        )
-                      }
-                    >
-                      <Text style={styles.generatedStepOliveLink}>올리브영에서 보기 →</Text>
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
+                    );
+                  }
+                )}
+              </View>
             </>
-          )}
+          ) : null}
         </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* AI 코치 FAB */}
+      <TouchableOpacity
+        style={styles.coachFAB}
+        onPress={() => navigation.navigate('RoutineCoachChat')}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.coachFABIcon}>💬</Text>
+      </TouchableOpacity>
+      <View style={styles.coachFABLabel} pointerEvents="none">
+        <Text style={styles.coachFABLabelText}>AI 코치</Text>
+      </View>
     </SafeAreaView>
   );
 }
@@ -493,7 +725,7 @@ const PAGE_BG = '#FDF6F9';
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: PAGE_BG },
   scroll: { flex: 1 },
-  content: { paddingBottom: 20, gap: 12 },
+  content: { paddingBottom: 80, gap: 12 },
 
   screenHeader: {
     paddingHorizontal: 16,
@@ -843,7 +1075,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
     marginBottom: 10,
-    borderLeftWidth: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   generatedStepHeader: {
     flexDirection: 'row',
@@ -857,6 +1090,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
+    backgroundColor: '#5BA3D9',
   },
   generatedStepNumText: {
     color: '#fff',
@@ -865,17 +1099,182 @@ const styles = StyleSheet.create({
   },
   generatedStepCategory: {
     fontWeight: '700',
-    fontSize: 15,
-    color: '#2D2D2D',
+    fontSize: 14,
+    color: '#5BA3D9',
   },
-  generatedStepIngredient: {
-    fontSize: 13,
-    color: Colors.accent,
-    marginBottom: 4,
+  generatedStepProduct: {
+    fontWeight: '700',
+    fontSize: 14,
+    color: '#1A1A2E',
+    flexShrink: 1,
+  },
+  generatedStepInstruction: {
+    fontSize: 14,
+    color: '#1A1A2E',
+    lineHeight: 20,
+    marginTop: 4,
   },
   generatedStepTip: {
     fontSize: 12,
-    color: '#999',
+    color: '#8A8A9A',
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+  eventFocusCard: {
+    backgroundColor: '#E8F4FD',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 4,
+  },
+  eventFocusText: {
+    fontSize: 13,
+    color: '#1A1A2E',
+    fontWeight: '500',
+    lineHeight: 19,
+  },
+  regenBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  regenBtnText: {
+    fontSize: 12,
+    color: '#8A8A9A',
+    fontWeight: '600',
+  },
+  // Collapsible ingredient headers
+  ingredientFoldHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 14,
+    backgroundColor: '#E8F4FD',
+    borderRadius: 12,
+    gap: 8,
+  },
+  ingredientFoldHeaderAvoid: {
+    backgroundColor: '#FFF0F5',
+  },
+  ingredientFoldTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#5BA3D9',
+  },
+  ingredientFoldPill: {
+    backgroundColor: '#5BA3D9',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  ingredientFoldPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+  },
+
+  // Compact routine steps
+  routineList: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+  },
+  compactStep: {
+    backgroundColor: '#fff',
+  },
+  compactStepDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  compactStepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    gap: 6,
+    minHeight: 44,
+  },
+  compactStepNum: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#5BA3D9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  compactStepNumText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  compactStepCategory: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#5BA3D9',
+    marginRight: 6,
+  },
+  compactStepProduct: {
+    fontSize: 13,
+    color: '#1A1A2E',
+    flex: 1,
+  },
+  compactStepOlive: {
+    fontSize: 11,
+    color: '#5BA3D9',
+    fontWeight: '600',
+  },
+  compactStepDetail: {
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    gap: 4,
+  },
+  compactStepInstruction: {
+    fontSize: 13,
+    color: '#1A1A2E',
+    lineHeight: 19,
+  },
+  compactStepTip: {
+    fontSize: 12,
+    color: '#8A8A9A',
+    fontStyle: 'italic',
+  },
+
+  // AI coach FAB
+  coachFAB: {
+    position: 'absolute',
+    bottom: 24,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#5BA3D9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#5BA3D9',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 999,
+  },
+  coachFABIcon: {
+    fontSize: 24,
+  },
+  coachFABLabel: {
+    position: 'absolute',
+    bottom: 6,
+    right: 20,
+    width: 56,
+    alignItems: 'center',
+    zIndex: 998,
+  },
+  coachFABLabelText: {
+    fontSize: 10,
+    color: '#5BA3D9',
+    fontWeight: '600',
   },
   generatedStepOliveLink: {
     fontSize: 12,
