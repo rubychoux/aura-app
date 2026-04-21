@@ -217,9 +217,9 @@ export function MyPageScreen() {
 
             {/* CTA */}
             <LinearGradient
-              colors={['#F2A7C3', '#C9B8FF']}
+              colors={['#F9C4D8', '#E8B4E8', '#C4B8E8', '#B8D4F0']}
               start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+              end={{ x: 1, y: 0 }}
               style={styles.ctaGradient}
             >
               <TouchableOpacity
