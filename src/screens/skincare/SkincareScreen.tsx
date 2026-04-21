@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
@@ -9,6 +10,8 @@ import {
   Alert,
   Linking,
 } from 'react-native';
+
+const logo = require('../../../assets/images/meve-logo.png');
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -221,6 +224,10 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        <View style={styles.screenHeader}>
+          <Image source={logo} style={styles.headerLogo} />
+        </View>
+
         {/* ── 1. D-DAY BANNER ────────────────────────────────────────────── */}
         {eventInfo && daysLeft != null && (
           <LinearGradient
@@ -487,6 +494,20 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: PAGE_BG },
   scroll: { flex: 1 },
   content: { paddingBottom: 20, gap: 12 },
+
+  screenHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  headerLogo: {
+    width: 170,
+    height: 68,
+    resizeMode: 'contain',
+    alignSelf: 'flex-start',
+    marginLeft: -40,
+    marginBottom: -8,
+  },
 
   // D-day banner
   ddayBanner: {

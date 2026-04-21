@@ -17,7 +17,7 @@ const tabIcons: Record<string, { active: IoniconsName; inactive: IoniconsName }>
   Home:      { active: 'home',          inactive: 'home-outline' },
   Skin:      { active: 'body',          inactive: 'body-outline' },
   Look:      { active: 'color-palette', inactive: 'color-palette-outline' },
-  Community: { active: 'people',        inactive: 'people-outline' },
+  Community: { active: 'sparkles',      inactive: 'sparkles-outline' },
   MyPage:    { active: 'person',        inactive: 'person-outline' },
 };
 
@@ -25,7 +25,7 @@ const labels: Record<string, string> = {
   Home:      '홈',
   Skin:      'SKIN',
   Look:      'LOOK',
-  Community: '커뮤니티',
+  Community: 'eve',
   MyPage:    '마이페이지',
 };
 
@@ -33,7 +33,7 @@ const ACTIVE_TINT: Record<string, string> = {
   Home: '#FF6B9D',
   Skin: '#5BA3D9',
   Look: '#FF6B9D',
-  Community: '#8A8A9A',
+  Community: '#FF6B9D',
   MyPage: '#8A8A9A',
 };
 

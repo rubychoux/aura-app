@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { supabase } from '../../services/supabase';
@@ -70,23 +71,20 @@ export function LookPollCreateScreen() {
     pollPrefix: string,
     index: number
   ): Promise<string> => {
-    try {
-      console.log('uploadPhoto start, uri:', uri);
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      console.log('fetch done, blob size:', blob.size);
-      const path = `${userId}/${pollPrefix}/${index}.jpg`;
-      const { error } = await supabase.storage
-        .from(BUCKET)
-        .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
-      console.log('upload done, error:', error);
-      if (error) throw error;
-      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-      return data.publicUrl;
-    } catch (e) {
-      console.log('uploadPhoto caught error:', e);
-      throw e;
-    }
+    console.log('uploadPhoto start, uri:', uri);
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    console.log('base64 read, length:', base64.length);
+    const path = `${userId}/${pollPrefix}/${index}.jpg`;
+    const byteArray = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, byteArray, { contentType: 'image/jpeg', upsert: true });
+    console.log('upload done, error:', error);
+    if (error) throw error;
+    const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    return data.publicUrl;
   };
 
   const handleSubmit = async () => {
