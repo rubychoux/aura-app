@@ -23,6 +23,8 @@ import { loadRoutineCheckin, RoutineCheckin } from '../../utils/routineCheckin';
 import { PremiumUpsellModal } from '../../components/PremiumUpsellModal';
 import { isPremiumNow } from '../../services/premium';
 import { openOliveYoungSearch } from '../../services/affiliate';
+import { buildLifestyleContextBlock, fetchDailyLogByDate, summarizeDailyLogRow } from '../../services/dailyLog';
+import { todayYmd } from '../../utils/dateYmd';
 
 type Nav = NativeStackNavigationProp<AIScanStackParamList, 'SkinHome'>;
 
@@ -77,6 +79,7 @@ export function SkincareScreen() {
   // Routine (check-in state for today; steps from HARDCODED_ROUTINE until Sprint 3)
   const [routineCheckin, setRoutineCheckin] = useState<RoutineCheckin>({ am: false, pm: false });
   const [routineTab, setRoutineTab] = useState<'am' | 'pm'>('am');
+  const [lifestyleSummary, setLifestyleSummary] = useState<string | null>(null);
 
   const daysLeft = eventDate
     ? Math.ceil((new Date(eventDate).getTime() - Date.now()) / 86_400_000)
@@ -90,11 +93,13 @@ export function SkincareScreen() {
     loadLastScan();
     loadCachedIngredients();
     loadRoutine();
+    loadLifestyle();
   }, []);
 
   useFocusEffect(
     useCallback(() => {
       loadRoutine();
+      loadLifestyle();
     }, [])
   );
 
@@ -135,9 +140,23 @@ export function SkincareScreen() {
   };
 
   const loadRoutine = async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayYmd();
     const checkin = await loadRoutineCheckin(today);
     setRoutineCheckin(checkin);
+  };
+
+  const loadLifestyle = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setLifestyleSummary(null);
+        return;
+      }
+      const row = await fetchDailyLogByDate(user.id, todayYmd());
+      setLifestyleSummary(summarizeDailyLogRow(row));
+    } catch {
+      setLifestyleSummary(null);
+    }
   };
 
   // ── Ingredient analysis ─────────────────────────────────────────────────────
@@ -153,6 +172,8 @@ export function SkincareScreen() {
     }
     setIsAnalyzing(true);
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const lifestyleBlock = user ? await buildLifestyleContextBlock(user.id) : '';
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -168,6 +189,9 @@ export function SkincareScreen() {
               content: `You are a Korean skincare expert.
 Skin analysis result: ${JSON.stringify(lastScan)}
 Upcoming event: ${eventType ?? 'none'}, ${daysLeft ?? 'unknown'} days away.
+
+Lifestyle context (Korean app users; use to bias recommendations, e.g. low sleep or high stress → barrier/soothing/calming; ignore if empty):
+${lifestyleBlock || '(no lifestyle data yet)'}
 Return ONLY valid JSON no markdown:
 {
   "recommended": [{"name":"성분명","benefit":"효능","reason":"이유"}],
@@ -234,7 +258,27 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
           </LinearGradient>
         )}
 
-        {/* ── 2. AI 피부 스캔 ─────────────────────────────────────────────── */}
+        {/* ── 2. 라이프스타일 로그 ──────────────────────────────────────── */}
+        <TouchableOpacity
+          style={styles.lifestyleCard}
+          onPress={() => navigation.navigate('DailyLog')}
+          activeOpacity={0.88}
+        >
+          <Ionicons name="moon-outline" size={24} color={Colors.accent} />
+          <View style={styles.lifestyleText}>
+            <Text style={styles.lifestyleTitle}>오늘의 라이프스타일 기록</Text>
+            {lifestyleSummary ? (
+              <Text style={styles.lifestyleDesc} numberOfLines={2}>
+                {lifestyleSummary}
+              </Text>
+            ) : (
+              <Text style={styles.lifestyleDesc}>수면·물·스트레스·식단을 기록해보세요</Text>
+            )}
+          </View>
+          <Text style={styles.lifestyleCta}>{lifestyleSummary ? '수정' : '기록하기'}</Text>
+        </TouchableOpacity>
+
+        {/* ── 3. AI 피부 스캔 ─────────────────────────────────────────────── */}
         <TouchableOpacity
           style={styles.scanCard}
           onPress={() => navigation.navigate('FaceScanner')}
@@ -248,7 +292,7 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
           <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
         </TouchableOpacity>
 
-        {/* ── 3. 성분 스캔하기 ────────────────────────────────────────────── */}
+        {/* ── 4. 성분 스캔하기 ────────────────────────────────────────────── */}
         <TouchableOpacity
           style={styles.ingredientScanCard}
           onPress={() => navigation.navigate('IngredientScanner')}
@@ -262,7 +306,7 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
           <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
         </TouchableOpacity>
 
-        {/* ── 4. 맞춤 성분 분석 ───────────────────────────────────────────── */}
+        {/* ── 5. 맞춤 성분 분석 ───────────────────────────────────────────── */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>내 피부 맞춤 성분</Text>
@@ -339,7 +383,7 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
           ) : null}
         </View>
 
-        {/* ── 5. 내 루틴 (Sprint 2: 샘플 · Sprint 3: GPT + Supabase) ─────── */}
+        {/* ── 6. 내 루틴 (Sprint 2: 샘플 · Sprint 3: GPT + Supabase) ─────── */}
         <View style={styles.section}>
           <View style={styles.routineSectionHeader}>
             <Text style={styles.sectionTitle}>내 루틴</Text>
@@ -457,6 +501,22 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginLeft: 30,
   },
+
+  lifestyleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginHorizontal: 16,
+    padding: 16,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  lifestyleText: { flex: 1, gap: 4 },
+  lifestyleTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  lifestyleDesc: { fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
+  lifestyleCta: { fontSize: 13, fontWeight: '800', color: Colors.accent },
 
   // AI scan card
   scanCard: {
