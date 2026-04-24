@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,46 +6,54 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  useWindowDimensions,
+  LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Svg, { Path, Ellipse } from 'react-native-svg';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
 import { supabase } from '../../services/supabase';
 import { MainStackParamList, ScanAnalysisResult } from '../../types';
 import { getMonthlyCount, isPremiumNow } from '../../services/premium';
 import { PremiumUpsellModal } from '../../components/PremiumUpsellModal';
+import { cleanJson } from '../../utils/openai';
+import {
+  SkinScanGuideModal,
+  SKIP_GUIDE_KEY,
+} from '../../components/SkinScanGuideModal';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
 type ScanStep = 'idle' | 'analyzing';
 
-const OPENAI_PROMPT = `You are a skincare analysis assistant.
-Analyze the skin condition visible in this photo for cosmetic skincare purposes only.
-This is not medical advice. Respond with ONLY a valid JSON object, no other text:
+const OPENAI_PROMPT = `You are an expert Korean dermatologist analyzing Asian skin. Analyze ONLY what is clearly visible in this photo. Korean skincare standards apply.
+Return ONLY valid JSON (no markdown, no other text):
 {
-  "overallScore": <number 0-100 representing overall skin clarity>,
-  "skinCondition": "<brief Korean description of skin type and condition>",
-  "acneType": "<type of blemishes if any, in Korean, or 없음>",
-  "severity": <1-5 where 1=very clear, 5=many blemishes>,
+  "overallScore": <0-100 integer>,
+  "skinType": "지성 or 건성 or 복합성 or 민감성 or 중성",
+  "hydrationLevel": "매우건조 or 건조 or 보통 or 촉촉 or 매우촉촉",
   "zones": {
-    "forehead": <1-5>,
-    "leftCheek": <1-5>,
-    "rightCheek": <1-5>,
-    "nose": <1-5>,
-    "chin": <1-5>
+    "forehead": {"status": "맑음 or 약간칙칙 or 트러블 or 모공넓음 or 번들거림", "score": 0-100},
+    "leftCheek": {"status": "맑음 or 약간칙칙 or 트러블 or 모공넓음 or 건조함", "score": 0-100},
+    "rightCheek": {"status": "맑음 or 약간칙칙 or 트러블 or 모공넓음 or 건조함", "score": 0-100},
+    "nose": {"status": "맑음 or 블랙헤드 or 모공넓음 or 번들거림 or 건조함", "score": 0-100},
+    "chin": {"status": "맑음 or 트러블 or 건조함 or 번들거림 or 칙칙함", "score": 0-100}
   },
-  "keyFindings": ["<finding in Korean>", "<finding>", "<finding>"],
-  "recommendations": ["<skincare tip in Korean>", "<tip>", "<tip>"],
-  "redness": {
-    "detected": <true or false>,
-    "zones": ["<affected zone name in Korean>"],
-    "severity": <1-5>,
-    "description": "<brief Korean description of redness or irritation>"
-  }
+  "concerns": ["concern1 in Korean", "concern2 if exists", "concern3 if exists"],
+  "strengths": ["strength1 in Korean", "strength2 if exists"],
+  "ingredients": {
+    "recommended": ["ingredient1", "ingredient2", "ingredient3", "ingredient4", "ingredient5"],
+    "avoid": ["ingredient1", "ingredient2", "ingredient3"]
+  },
+  "routineAdvice": {
+    "morning": "specific 2-line AM advice Korean 해요체",
+    "evening": "specific 2-line PM advice Korean 해요체"
+  },
+  "summary": "3-4 lines warm encouraging summary Korean 해요체"
 }`;
 
 const runAnalysis = async (base64String: string): Promise<ScanAnalysisResult> => {
@@ -81,11 +89,9 @@ const runAnalysis = async (base64String: string): Promise<ScanAnalysisResult> =>
     throw new Error(openaiData.error?.message ?? `OpenAI ${openaiResponse.status}`);
   }
 
-  const content = openaiData.choices[0].message.content.trim();
+  const content = openaiData.choices[0].message.content;
   console.log('[OpenAI] raw content:', content);
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('No JSON found in response');
-  const result: ScanAnalysisResult = JSON.parse(jsonMatch[0]);
+  const result: ScanAnalysisResult = JSON.parse(cleanJson(content));
 
   // Save to skin_scans (best-effort — don't block navigation on failure)
   try {
@@ -105,14 +111,32 @@ const runAnalysis = async (base64String: string): Promise<ScanAnalysisResult> =>
 
 export function FaceScannerScreen() {
   const navigation = useNavigation<Nav>();
-  const { width, height } = useWindowDimensions();
   const [permission, requestPermission] = useCameraPermissions();
   const [step, setStep] = useState<ScanStep>('idle');
+  const [layout, setLayout] = useState<{ width: number; height: number } | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
   const cameraRef = useRef<CameraView>(null);
   const [upsellOpen, setUpsellOpen] = useState(false);
 
-  const ovalWidth = width * 0.62;
-  const ovalHeight = ovalWidth * 1.35;
+  useEffect(() => {
+    AsyncStorage.getItem(SKIP_GUIDE_KEY).then((val) => {
+      if (val !== 'true') setShowGuide(true);
+    });
+  }, []);
+
+  const handleContainerLayout = (e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setLayout({ width, height });
+  };
+
+  const width = layout?.width ?? 0;
+  const height = layout?.height ?? 0;
+  // Oval: 75% of screen width, ~1.2x that for height, horizontally centered,
+  // vertically placed so it sits in the upper ~60% of the frame.
+  const ovalRx = (width * 0.75) / 2;
+  const ovalRy = ovalRx * 1.2;
+  const ovalCx = width / 2;
+  const ovalCy = height * 0.42;
 
   const handleCapture = async () => {
     if (step !== 'idle' || !cameraRef.current) return;
@@ -145,18 +169,26 @@ export function FaceScannerScreen() {
   const handleMockCapture = () => {
     const mockResult: ScanAnalysisResult = {
       overallScore: 72,
-      skinCondition: '복합성 피부, T존 피지 과다',
-      acneType: '좁쌀 여드름',
-      severity: 3,
-      zones: { forehead: 3, leftCheek: 2, rightCheek: 2, nose: 4, chin: 2 },
-      keyFindings: ['T존 피지 분비 과다', '볼 부위 수분 부족', '코 주변 모공 확대'],
-      recommendations: ['나이아신아마이드 토너 추천', '오일프리 수분크림 사용', '주 1회 클레이 마스크팩'],
-      redness: {
-        detected: true,
-        zones: ['이마', '코'],
-        severity: 3,
-        description: '이마와 코 주변에 홍조 감지됨. 자극성 성분 주의 필요',
+      skinType: '복합성',
+      hydrationLevel: '보통',
+      zones: {
+        forehead: { status: '번들거림', score: 60 },
+        leftCheek: { status: '맑음', score: 82 },
+        rightCheek: { status: '건조함', score: 70 },
+        nose: { status: '모공넓음', score: 55 },
+        chin: { status: '맑음', score: 80 },
       },
+      concerns: ['T존 피지 분비 과다', '볼 부위 수분 부족', '코 주변 모공 확대'],
+      strengths: ['전반적인 피부 톤 균일', '볼 부위 결이 매끄러움'],
+      ingredients: {
+        recommended: ['나이아신아마이드', '판테놀', '세라마이드', '히알루론산', '아연'],
+        avoid: ['알코올', '향료', '에센셜 오일'],
+      },
+      routineAdvice: {
+        morning: '저자극 클렌저로 세안하고, 수분 토너 후 오일프리 수분크림을 발라요.\n자외선 차단제는 꼭 챙겨주세요.',
+        evening: '이중 세안 후 나이아신아마이드 세럼으로 모공 케어해요.\n주 1회 클레이 마스크팩으로 T존을 관리해 주세요.',
+      },
+      summary: '복합성 피부로 T존 관리가 필요한 상태예요. 전반적인 피부 톤은 균일하니까,\n피지 조절 성분을 중심으로 루틴을 짜면 금세 맑아질 거예요. 함께 관리해봐요 💕',
     };
     navigation.navigate('ScanResult', { result: mockResult });
   };
@@ -188,7 +220,7 @@ export function FaceScannerScreen() {
 
   // ── 카메라 뷰 ─────────────────────────────────────────────────────────────
   return (
-    <View style={styles.cameraContainer}>
+    <View style={styles.cameraContainer} onLayout={handleContainerLayout}>
       <PremiumUpsellModal
         visible={upsellOpen}
         onClose={() => setUpsellOpen(false)}
@@ -214,39 +246,30 @@ export function FaceScannerScreen() {
         </Text>
       </SafeAreaView>
 
-      {/* 오발 페이스 가이드 + 딤 오버레이 */}
-      <View style={styles.overlayWrapper}>
-        {/* 상단 딤 */}
-        <View style={[styles.dimBlock, { height: (height - ovalHeight) / 2 - 40 }]} />
-
-        {/* 오발 행 */}
-        <View style={{ flexDirection: 'row', height: ovalHeight }}>
-          <View style={styles.dimBlock} />
-          <View
-            style={[
-              styles.ovalCutout,
-              { width: ovalWidth, height: ovalHeight, borderRadius: ovalWidth / 2 },
-            ]}
+      {/* 오발 가이드 + 딤 — SVG evenodd cutout, pink ellipse stroke */}
+      {width > 0 && height > 0 && (
+        <Svg
+          width={width}
+          height={height}
+          style={StyleSheet.absoluteFillObject}
+          pointerEvents="none"
+        >
+          <Path
+            d={`M 0 0 H ${width} V ${height} H 0 Z M ${ovalCx - ovalRx} ${ovalCy} A ${ovalRx} ${ovalRy} 0 1 0 ${ovalCx + ovalRx} ${ovalCy} A ${ovalRx} ${ovalRy} 0 1 0 ${ovalCx - ovalRx} ${ovalCy} Z`}
+            fill="rgba(0,0,0,0.4)"
+            fillRule="evenodd"
           />
-          <View style={styles.dimBlock} />
-        </View>
-
-        {/* 하단 딤 */}
-        <View style={[styles.dimBlock, { flex: 1 }]} />
-      </View>
-
-      {/* 오발 테두리 */}
-      <View
-        pointerEvents="none"
-        style={[
-          styles.ovalBorder,
-          {
-            width: ovalWidth,
-            height: ovalHeight,
-            borderRadius: ovalWidth / 2,
-          },
-        ]}
-      />
+          <Ellipse
+            cx={ovalCx}
+            cy={ovalCy}
+            rx={ovalRx}
+            ry={ovalRy}
+            stroke="#FF6B9D"
+            strokeWidth={2}
+            fill="none"
+          />
+        </Svg>
+      )}
 
       {/* 분석 중 오버레이 */}
       {step === 'analyzing' && (
@@ -273,6 +296,16 @@ export function FaceScannerScreen() {
           )}
         </SafeAreaView>
       )}
+
+      {/* 스캔 가이드 모달 */}
+      <SkinScanGuideModal
+        visible={showGuide}
+        onCancel={() => {
+          setShowGuide(false);
+          navigation.goBack();
+        }}
+        onConfirm={() => setShowGuide(false)}
+      />
     </View>
   );
 }
@@ -322,29 +355,6 @@ const styles = StyleSheet.create({
     ...Typography.caption,
     color: 'rgba(255,255,255,0.75)',
     marginTop: 4,
-  },
-
-  // 딤 오버레이
-  overlayWrapper: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1,
-  },
-  dimBlock: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  ovalCutout: {
-    backgroundColor: 'transparent',
-  },
-
-  // 오발 테두리
-  ovalBorder: {
-    position: 'absolute',
-    alignSelf: 'center',
-    top: '20%',
-    borderWidth: 2.5,
-    borderColor: Colors.accent,
-    zIndex: 2,
   },
 
   // 분석 중 오버레이

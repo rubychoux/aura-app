@@ -2,7 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { MainTabParamList } from '../types';
-import { Colors, Typography } from '../constants/theme';
+import { Typography } from '../constants/theme';
 import { HomeScreen } from '../screens/home/HomeScreen';
 import { AIScanNavigator } from './AIScanNavigator';
 import { LookScreen } from '../screens/look/LookScreen';
@@ -17,7 +17,7 @@ const tabIcons: Record<string, { active: IoniconsName; inactive: IoniconsName }>
   Home:      { active: 'home',          inactive: 'home-outline' },
   Skin:      { active: 'body',          inactive: 'body-outline' },
   Look:      { active: 'color-palette', inactive: 'color-palette-outline' },
-  Community: { active: 'people',        inactive: 'people-outline' },
+  Community: { active: 'sparkles',      inactive: 'sparkles-outline' },
   MyPage:    { active: 'person',        inactive: 'person-outline' },
 };
 
@@ -25,8 +25,16 @@ const labels: Record<string, string> = {
   Home:      '홈',
   Skin:      'SKIN',
   Look:      'LOOK',
-  Community: '커뮤니티',
+  Community: 'eve',
   MyPage:    '마이페이지',
+};
+
+const ACTIVE_TINT: Record<string, string> = {
+  Home: '#FF6B9D',
+  Skin: '#5BA3D9',
+  Look: '#FF6B9D',
+  Community: '#FF6B9D',
+  MyPage: '#8A8A9A',
 };
 
 export function MainNavigator() {
@@ -40,14 +48,15 @@ export function MainNavigator() {
           return <Ionicons name={name} size={24} color={color} />;
         },
         tabBarLabel: labels[route.name],
-        tabBarActiveTintColor: Colors.accent,
-        tabBarInactiveTintColor: Colors.textSecondary,
+        tabBarActiveTintColor: ACTIVE_TINT[route.name] ?? '#8A8A9A',
+        tabBarInactiveTintColor: '#C0C0CC',
         tabBarStyle: {
-          backgroundColor: Colors.surface,
-          borderTopColor: Colors.border,
+          backgroundColor: 'rgba(255,255,255,0.95)',
+          borderTopColor: 'rgba(220,220,230,0.5)',
           borderTopWidth: 1,
-          height: 80,
-          paddingBottom: 16,
+          height: 84,
+          paddingBottom: 20,
+          paddingTop: 8,
         },
         tabBarLabelStyle: {
           ...Typography.caption,

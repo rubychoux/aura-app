@@ -6,12 +6,13 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { MainStackParamList } from '../../types';
+import { MainStackParamList, SkinZone } from '../../types';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
 import { supabase } from '../../services/supabase';
 import { openOliveYoungSearch } from '../../services/affiliate';
@@ -27,18 +28,21 @@ const ZONE_LABELS: Record<string, string> = {
   chin: '턱',
 };
 
-function severityColor(level: number): string {
-  if (level <= 1) return Colors.success;
-  if (level <= 2) return '#A8D5A2';
-  if (level <= 3) return Colors.warning;
-  if (level <= 4) return '#F2994A';
-  return Colors.danger;
-}
-
 function scoreColor(score: number): string {
   if (score >= 80) return Colors.success;
   if (score >= 60) return Colors.warning;
   return Colors.danger;
+}
+
+// Normalizes zone data across old (number 1-5) and new (SkinZone) schemas.
+function zoneScore(z: SkinZone | number | undefined): number {
+  if (z == null) return 0;
+  if (typeof z === 'number') return Math.max(0, 100 - (z - 1) * 20);
+  return z.score;
+}
+function zoneStatus(z: SkinZone | number | undefined): string {
+  if (z == null || typeof z === 'number') return '';
+  return z.status;
 }
 
 function scoreLabel(score: number): string {
@@ -74,6 +78,18 @@ export function ScanResultScreen() {
     }
   };
 
+  const handleMakeRoutine = async () => {
+    try {
+      await AsyncStorage.multiSet([
+        ['meve_last_scan_result', JSON.stringify(result)],
+      ]);
+      await AsyncStorage.removeItem('meve_routine');
+      navigation.navigate('MainTabs', { screen: 'Skin' } as any);
+    } catch (e: any) {
+      Alert.alert('오류', e?.message ?? '다시 시도해 주세요.');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <ScrollView
@@ -96,33 +112,141 @@ export function ScanResultScreen() {
             <Text style={[styles.scoreStatus, { color: scoreColor(result.overallScore) }]}>
               {scoreLabel(result.overallScore)}
             </Text>
-            <Text style={styles.skinCondition}>{result.skinCondition}</Text>
-            <Text style={styles.acneType}>{result.acneType} · 심각도 {result.severity}/5</Text>
+            <Text style={styles.skinCondition}>
+              {result.skinType ?? result.skinCondition ?? ''}
+            </Text>
+            {result.hydrationLevel && (
+              <Text style={styles.acneType}>수분 · {result.hydrationLevel}</Text>
+            )}
           </View>
         </View>
+
+        {/* AI 요약 */}
+        {result.summary && (
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryText}>{result.summary}</Text>
+          </View>
+        )}
 
         {/* 부위별 상태 */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>부위별 상태</Text>
           <View style={styles.zonesGrid}>
-            {Object.entries(result.zones).map(([key, level]) => {
+            {Object.entries(result.zones).map(([key, z]) => {
               const label = ZONE_LABELS[key];
-              const hasRedness =
-                result.redness?.detected &&
-                result.redness.zones.includes(label);
-              const dotColor = hasRedness ? Colors.danger : severityColor(level);
+              const score = zoneScore(z as SkinZone | number | undefined);
+              const status = zoneStatus(z as SkinZone | number | undefined);
+              const color = scoreColor(score);
               return (
                 <View key={key} style={styles.zoneItem}>
-                  <View style={[styles.zoneDot, { backgroundColor: dotColor }]} />
+                  <View style={[styles.zoneDot, { backgroundColor: color }]} />
                   <Text style={styles.zoneLabel}>{label}</Text>
-                  <Text style={[styles.zoneLevel, { color: dotColor }]}>Lv.{level}</Text>
+                  {status ? (
+                    <Text style={[styles.zoneLevel, { color }]} numberOfLines={1}>
+                      {status}
+                    </Text>
+                  ) : (
+                    <Text style={[styles.zoneLevel, { color }]}>{score}점</Text>
+                  )}
                 </View>
               );
             })}
           </View>
         </View>
 
-        {/* 홍조 / 자극 */}
+        {/* 강점 */}
+        {result.strengths && result.strengths.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>피부 강점</Text>
+            <View style={[styles.listCard, styles.strengthsCard]}>
+              {result.strengths.map((s, i) => (
+                <View key={i} style={styles.listRow}>
+                  <View style={[styles.bullet, { backgroundColor: Colors.success }]} />
+                  <Text style={styles.listText}>{s}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* 주요 고민 */}
+        {((result.concerns && result.concerns.length > 0) ||
+          (result.keyFindings && result.keyFindings.length > 0)) && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>주요 고민</Text>
+            <View style={styles.listCard}>
+              {(result.concerns ?? result.keyFindings ?? []).map((c, i) => (
+                <View key={i} style={styles.listRow}>
+                  <View style={styles.bullet} />
+                  <Text style={styles.listText}>{c}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* 추천 성분 */}
+        {result.ingredients?.recommended && result.ingredients.recommended.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>추천 성분</Text>
+            <View style={styles.listCard}>
+              {result.ingredients.recommended.map((name, i) => (
+                <View key={i} style={styles.recItem}>
+                  <View style={styles.listRow}>
+                    <Text style={styles.recIndex}>{i + 1}</Text>
+                    <Text style={styles.listText}>{name}</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() =>
+                      openOliveYoungSearch(name, { source: 'scan_result_ingredient', item_name: name })
+                    }
+                    style={styles.oliveyoungBtn}
+                  >
+                    <Text style={styles.oliveyoungText}>올리브영에서 보기 →</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* 피해야 할 성분 */}
+        {result.ingredients?.avoid && result.ingredients.avoid.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>피해야 할 성분</Text>
+            <View style={[styles.listCard, styles.rednessCard]}>
+              {result.ingredients.avoid.map((name, i) => (
+                <View key={i} style={styles.listRow}>
+                  <View style={[styles.bullet, { backgroundColor: Colors.danger }]} />
+                  <Text style={styles.listText}>{name}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* 루틴 가이드 */}
+        {result.routineAdvice && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>루틴 가이드</Text>
+            <View style={styles.routineCard}>
+              <View style={styles.routineHeader}>
+                <Ionicons name="sunny-outline" size={16} color={Colors.accent} />
+                <Text style={styles.routineLabel}>AM</Text>
+              </View>
+              <Text style={styles.routineText}>{result.routineAdvice.morning}</Text>
+            </View>
+            <View style={styles.routineCard}>
+              <View style={styles.routineHeader}>
+                <Ionicons name="moon-outline" size={16} color="#5BA3D9" />
+                <Text style={[styles.routineLabel, { color: '#5BA3D9' }]}>PM</Text>
+              </View>
+              <Text style={styles.routineText}>{result.routineAdvice.evening}</Text>
+            </View>
+          </View>
+        )}
+
+        {/* 홍조 / 자극 (legacy) */}
         {result.redness?.detected && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>홍조 / 자극</Text>
@@ -143,40 +267,44 @@ export function ScanResultScreen() {
         )}
 
         {/* 주요 소견 */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>주요 소견</Text>
-          <View style={styles.listCard}>
-            {result.keyFindings.map((finding, i) => (
-              <View key={i} style={styles.listRow}>
-                <View style={styles.bullet} />
-                <Text style={styles.listText}>{finding}</Text>
-              </View>
-            ))}
+        {(result.keyFindings?.length ?? 0) > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>주요 소견</Text>
+            <View style={styles.listCard}>
+              {(result.keyFindings ?? []).map((finding, i) => (
+                <View key={i} style={styles.listRow}>
+                  <View style={styles.bullet} />
+                  <Text style={styles.listText}>{finding}</Text>
+                </View>
+              ))}
+            </View>
           </View>
-        </View>
+        )}
 
         {/* AI 추천 */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>AI 추천</Text>
-          <View style={styles.listCard}>
-            {result.recommendations.map((rec, i) => (
-              <View key={i} style={styles.recItem}>
-                <View style={styles.listRow}>
-                  <Text style={styles.recIndex}>{i + 1}</Text>
-                  <Text style={styles.listText}>{rec}</Text>
+        {(result.recommendations?.length ?? 0) > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>AI 추천</Text>
+            <View style={styles.listCard}>
+              {(result.recommendations ?? []).map((rec, i) => (
+                <View key={i} style={styles.recItem}>
+                  <View style={styles.listRow}>
+                    <Text style={styles.recIndex}>{i + 1}</Text>
+                    <Text style={styles.listText}>{rec}</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() =>
+                      openOliveYoungSearch(rec, { source: 'scan_recommendation', item_name: rec })
+                    }
+                    style={styles.oliveyoungBtn}
+                  >
+                    <Text style={styles.oliveyoungText}>올리브영에서 보기 →</Text>
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity
-                  onPress={() =>
-                    openOliveYoungSearch(rec, { source: 'scan_recommendation', item_name: rec })
-                  }
-                  style={styles.oliveyoungBtn}
-                >
-                  <Text style={styles.oliveyoungText}>올리브영에서 보기 →</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
+              ))}
+            </View>
           </View>
-        </View>
+        )}
 
         {/* 하단 버튼 */}
         <View style={styles.buttons}>
@@ -190,6 +318,17 @@ export function ScanResultScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+
+        {/* 이 결과로 루틴 만들기 */}
+        <TouchableOpacity
+          onPress={handleMakeRoutine}
+          activeOpacity={0.85}
+          style={styles.routineBtn}
+        >
+          <Ionicons name="sparkles-outline" size={20} color="#fff" />
+          <Text style={styles.routineBtnText}>이 결과로 루틴 만들기 →</Text>
+        </TouchableOpacity>
+
         <View style={[styles.buttons, styles.buttonsBottom]}>
           <TouchableOpacity
             style={styles.retryBtn}
@@ -323,6 +462,52 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
+  // AI 요약 카드
+  summaryCard: {
+    backgroundColor: '#FFF5F9',
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: '#FFC4D6',
+  },
+  summaryText: {
+    ...Typography.body,
+    lineHeight: 22,
+    color: Colors.textPrimary,
+  },
+
+  // 강점 카드
+  strengthsCard: {
+    borderColor: '#C8E6C9',
+    backgroundColor: '#F1FBF3',
+  },
+
+  // 루틴 가이드 카드
+  routineCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 6,
+  },
+  routineHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  routineLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: Colors.accent,
+    letterSpacing: 0.5,
+  },
+  routineText: {
+    ...Typography.body,
+    color: Colors.textPrimary,
+    lineHeight: 21,
+  },
+
   // 홍조 카드
   rednessCard: {
     borderColor: '#FFCDD2',
@@ -376,4 +561,19 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.success,
   },
   saveBtnText: { ...Typography.cta, color: Colors.surface },
+  routineBtn: {
+    backgroundColor: Colors.accent,
+    borderRadius: 16,
+    padding: 18,
+    marginTop: Spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  routineBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16,
+  },
 });
