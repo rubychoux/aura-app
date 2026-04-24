@@ -2,11 +2,13 @@ import 'react-native-url-polyfill/auto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+const supabaseUrl = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim();
+const supabaseAnonKey = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '').trim();
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('⚠️  Supabase env vars not set. Add to .env.local');
+  throw new Error(
+    'Missing Supabase environment variables. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY (for example in .env.local) and restart Expo.'
+  );
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {

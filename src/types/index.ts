@@ -162,6 +162,12 @@ export type MainStackParamList = {
   MainTabs: undefined;
   ScanResult: { result: ScanAnalysisResult; isSaved?: boolean };
   EventFlow: undefined;
+  Paywall: { source?: string } | undefined;
+};
+
+export type CommunityStackParamList = {
+  CommunityFeed: undefined;
+  CreatePost: undefined;
 };
 
 export type EventStackParamList = {

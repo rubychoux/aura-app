@@ -14,6 +14,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../../types';
 import { Colors, Typography, Spacing, Radius } from '../../constants/theme';
 import { supabase } from '../../services/supabase';
+import { openOliveYoungSearch } from '../../services/affiliate';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'ScanResult'>;
 type Route = RouteProp<MainStackParamList, 'ScanResult'>;
@@ -166,9 +167,7 @@ export function ScanResultScreen() {
                 </View>
                 <TouchableOpacity
                   onPress={() =>
-                    Linking.openURL(
-                      `https://www.oliveyoung.co.kr/store/search/getSearchMain.do?query=${encodeURIComponent(rec)}`
-                    )
+                    openOliveYoungSearch(rec, { source: 'scan_recommendation', item_name: rec })
                   }
                   style={styles.oliveyoungBtn}
                 >
