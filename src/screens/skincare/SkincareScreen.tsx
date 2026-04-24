@@ -20,6 +20,9 @@ import { supabase } from '../../services/supabase';
 import { AIScanStackParamList, ScanAnalysisResult } from '../../types';
 import { HARDCODED_ROUTINE, oliveYoungSearchUrl, RoutineStep } from '../../constants/routine';
 import { loadRoutineCheckin, RoutineCheckin } from '../../utils/routineCheckin';
+import { PremiumUpsellModal } from '../../components/PremiumUpsellModal';
+import { isPremiumNow } from '../../services/premium';
+import { openOliveYoungSearch } from '../../services/affiliate';
 
 type Nav = NativeStackNavigationProp<AIScanStackParamList, 'SkinHome'>;
 
@@ -69,6 +72,7 @@ export function SkincareScreen() {
   // Ingredient analysis
   const [ingredientResult, setIngredientResult] = useState<IngredientResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [upsellOpen, setUpsellOpen] = useState(false);
 
   // Routine (check-in state for today; steps from HARDCODED_ROUTINE until Sprint 3)
   const [routineCheckin, setRoutineCheckin] = useState<RoutineCheckin>({ am: false, pm: false });
@@ -139,6 +143,10 @@ export function SkincareScreen() {
   // ── Ingredient analysis ─────────────────────────────────────────────────────
 
   const analyzeIngredients = async () => {
+    if (!isPremiumNow()) {
+      setUpsellOpen(true);
+      return;
+    }
     if (!lastScan) {
       Alert.alert('피부 스캔 필요', '먼저 AI 피부 스캔을 해주세요');
       return;
@@ -190,6 +198,15 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <PremiumUpsellModal
+        visible={upsellOpen}
+        onClose={() => setUpsellOpen(false)}
+        onUpgrade={() => {
+          setUpsellOpen(false);
+          (navigation as any).getParent?.()?.navigate?.('Paywall', { source: 'ingredient_insights' });
+        }}
+        subtitle="전체 맞춤 성분 분석은 프리미엄 기능이에요."
+      />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
@@ -293,11 +310,7 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
                   <Text style={styles.ingredientBenefit}>{item.benefit}</Text>
                   <Text style={styles.ingredientReason}>{item.reason}</Text>
                   <TouchableOpacity
-                    onPress={() =>
-                      Linking.openURL(
-                        `https://www.oliveyoung.co.kr/store/search/getSearchMain.do?query=${encodeURIComponent(item.name)}`
-                      )
-                    }
+                    onPress={() => openOliveYoungSearch(item.name, { source: 'skincare_recommended_ingredient', item_name: item.name })}
                   >
                     <Text style={styles.oliveyoungLink}>올리브영에서 보기 →</Text>
                   </TouchableOpacity>
@@ -395,7 +408,7 @@ Max 4 recommended, 3 avoid. All text in Korean.`,
                   <Text style={styles.routineStepDesc}>{step.description}</Text>
                   <Text style={styles.routineStepIngredient}>추천 성분: {step.keyIngredient}</Text>
                   <TouchableOpacity
-                    onPress={() => Linking.openURL(oliveYoungSearchUrl(step.searchQuery))}
+                    onPress={() => openOliveYoungSearch(step.searchQuery, { source: 'routine_step', item_name: step.searchQuery })}
                     activeOpacity={0.7}
                   >
                     <Text style={styles.oliveyoungLink}>올리브영에서 보기 →</Text>
