@@ -64,6 +64,7 @@ const runAnalysis = async (base64String: string): Promise<ScanAnalysisResult> =>
     body: JSON.stringify({
       model: 'gpt-4o',
       max_tokens: 1000,
+      response_format: { type: 'json_object' },
       messages: [{
         role: 'user',
         content: [
@@ -87,9 +88,15 @@ const runAnalysis = async (base64String: string): Promise<ScanAnalysisResult> =>
     throw new Error(openaiData.error?.message ?? `OpenAI ${openaiResponse.status}`);
   }
 
-  const content = openaiData.choices[0].message.content;
+  const content: string = openaiData.choices[0].message.content ?? '';
   console.log('[OpenAI] raw content:', content);
-  const result: ScanAnalysisResult = JSON.parse(cleanJson(content));
+  let result: ScanAnalysisResult;
+  try {
+    result = JSON.parse(cleanJson(content));
+  } catch {
+    console.warn('[FaceScanner] non-JSON response:', content.slice(0, 200));
+    throw new Error('피부를 분석하지 못했어요. 정면을 보고 밝은 곳에서 다시 찍어주세요.');
+  }
 
   // Save to skin_scans (best-effort — don't block navigation on failure)
   try {

@@ -172,6 +172,7 @@ export type MainStackParamList = {
   LookDetail: { look: LookRecommendation };
   InspoLook: undefined;
   InspoLookResult: { result: InspoLookResult; imageUri?: string; keyword?: string };
+  InspoLookSaved: undefined;
   GlamSyncList: undefined;
   GlamSyncCreate: undefined;
   GlamSyncDetail: { syncId: string };
@@ -327,6 +328,8 @@ export interface FaceAnalysisResult {
   eyeTail: string;
   lipFullness: string;
   skinTone: string;
+  skinToneHex?: string;
+  foundationShade?: string;
   makeupRecommendation: {
     foundation: string;
     lip: string;

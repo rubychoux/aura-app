@@ -14,6 +14,7 @@ import { TodaysLookScreen } from '../screens/look/TodaysLookScreen';
 import { LookDetailScreen } from '../screens/look/LookDetailScreen';
 import { InspoLookScreen } from '../screens/look/InspoLookScreen';
 import { InspoLookResultScreen } from '../screens/look/InspoLookResultScreen';
+import { InspoLookSavedScreen } from '../screens/look/InspoLookSavedScreen';
 import { GlamSyncListScreen } from '../screens/community/GlamSyncListScreen';
 import { GlamSyncCreateScreen } from '../screens/community/GlamSyncCreateScreen';
 import { GlamSyncDetailScreen } from '../screens/community/GlamSyncDetailScreen';
@@ -47,6 +48,7 @@ export function MainStackNavigator() {
       <Stack.Screen name="LookDetail" component={LookDetailScreen} />
       <Stack.Screen name="InspoLook" component={InspoLookScreen} />
       <Stack.Screen name="InspoLookResult" component={InspoLookResultScreen} />
+      <Stack.Screen name="InspoLookSaved" component={InspoLookSavedScreen} />
       <Stack.Screen name="GlamSyncList" component={GlamSyncListScreen} />
       <Stack.Screen name="GlamSyncCreate" component={GlamSyncCreateScreen} />
       <Stack.Screen name="GlamSyncDetail" component={GlamSyncDetailScreen} />
